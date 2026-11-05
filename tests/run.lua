@@ -1,4 +1,4 @@
--- Tests for Ding's protocol and rate logic, outside the game.
+-- Tests for Dingus's protocol and rate logic, outside the game.
 -- From the addon folder: nix-shell -p lua5_1 --run 'lua tests/run.lua'
 
 local clock = 1000
@@ -12,7 +12,7 @@ end
 local ns = {}
 local function Load(path)
     local chunk = assert(loadfile(path))
-    chunk("Ding", ns)
+    chunk("Dingus", ns)
 end
 Load("Core.lua")
 Load("Comm.lua")
@@ -263,11 +263,17 @@ test("old saved settings move to the new defaults once", function()
     local db = ns.InitDB({ settings = { opacity = 0.46, collapsed = true } })
     eq(db.settings.opacity, 0, "background removed")
     eq(db.settings.collapsed, nil, "header state gone")
-    eq(db.schema, 5)
+    eq(db.schema, 7)
     db.settings.opacity = 0.3
     eq(ns.InitDB(db).settings.opacity, 0.3, "a value set afterwards stays")
     eq(ns.InitDB({ schema = 4, settings = { showGuild = true } }).settings.showGuild, false, "guild reset once")
     eq(ns.InitDB({ schema = 5, settings = { showGuild = true } }).settings.showGuild, true, "turned on afterwards stays")
+    eq(ns.InitDB({ schema = 5, settings = { shown = false } }).settings.shown, true, "panel shown again once")
+    eq(ns.InitDB({ schema = 6, settings = { shown = false } }).settings.shown, false, "hidden afterwards stays")
+    eq(ns.InitDB({}).settings.shown, true, "new install")
+    eq(ns.InitDB({ schema = 6, settings = { showSelf = false } }).settings.showSelf, true, "own bar on once")
+    eq(ns.InitDB({ schema = 7, settings = { showSelf = false } }).settings.showSelf, false, "turned off afterwards stays")
+    eq(ns.InitDB({}).settings.showSelf, true, "new install")
     eq(ns.InitDB({}).settings.showGuild, false, "new install")
     eq(ns.InitDB({}).settings.opacity, 0, "new install")
 end)

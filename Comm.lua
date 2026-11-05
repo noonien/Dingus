@@ -1,4 +1,4 @@
--- Messages between Ding clients.
+-- Messages between Dingus clients.
 --
 -- Everything received is data from another client: it is parsed into checked
 -- numbers and cleaned strings, and never run. Text fields lose "|" so a sender
@@ -7,7 +7,7 @@
 -- Wire format, fields separated by "~", version first:
 --   1~H                                                hello: send me your status
 --   1~S~seq~level~xp~xpMax~rested~CLASS~name~zone~questXP    status; zone may be empty
---   1~D~nonce / 1~E~nonce                              /ding diag ping and reply
+--   1~D~nonce / 1~E~nonce                              /dingus diag ping and reply
 
 local _, ns = ...
 
@@ -15,7 +15,7 @@ local Protocol = {}
 ns.Protocol = Protocol
 
 Protocol.VERSION = "1"
-Protocol.PREFIX = "DingXP"
+Protocol.PREFIX = "DingusXP"
 Protocol.MAX_BYTES = 255
 
 local SEP = "~"
@@ -352,7 +352,7 @@ local function HandleHello(route)
         replyPending[route.kind] = true
         C_Timer.After(1 + math.random() * 3, function()
             replyPending[route.kind] = nil
-            if CanShare(route) then Enqueue(route, ns.Tracker:EncodeOwnStatus(), "S:" .. route.kind) end
+            ns.Tracker:SendStatus()
         end)
     elseif CanShare(route) then
         Enqueue(route, ns.Tracker:EncodeOwnStatus(), "S:" .. Comm.RouteId(route))
@@ -447,7 +447,7 @@ function Comm:Start()
 end
 
 --------------------------------------------------------------------------------
--- /ding diag: what the client allows, and which routes actually reach someone
+-- /dingus diag: what the client allows, and which routes actually reach someone
 --------------------------------------------------------------------------------
 
 function Comm:RunDiag()
@@ -487,7 +487,7 @@ function Comm:RunDiag()
     local current = diag
     C_Timer.After(DIAG_WAIT, function()
         if #current.replies == 0 then
-            ns.Print("No replies. Someone else must be online with Ding, and sharing, for this to test a route.")
+            ns.Print("No replies. Someone else must be online with Dingus, and sharing, for this to test a route.")
         end
         for _, reply in ipairs(current.replies) do
             ns.Print(("%s reached %s in %.1fs"):format(reply.label, reply.name, reply.delay))

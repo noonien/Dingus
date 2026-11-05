@@ -103,6 +103,8 @@ C_Timer = {
 
 -- Steps time in small slices, so a timer started by a timer fires when it should.
 local STEP = 0.05
+local REGULAR_UPDATE_SECONDS = 30
+
 local function Advance(seconds)
     for _ = 1, math.ceil(seconds / STEP) do
         clock = clock + STEP
@@ -220,7 +222,7 @@ Settings = {
 
 local ns = {}
 for _, file in ipairs({ "Core", "Comm", "Roster", "Tracker", "UI", "Options" }) do
-    assert(loadfile(file .. ".lua"))("Ding", ns)
+    assert(loadfile(file .. ".lua"))("Dingus", ns)
 end
 local eventFrame = frames[1]
 local function Fire(event, ...) eventFrame.scripts.OnEvent(eventFrame, event, ...) end
@@ -286,9 +288,9 @@ local function ShowEverything()
 end
 
 test("loads and logs in", function()
-    DingAddonDB = nil
-    Fire("ADDON_LOADED", "Ding")
-    assert(DingAddonDB.settings.sharing == true)
+    DingusAddonDB = nil
+    Fire("ADDON_LOADED", "Dingus")
+    assert(DingusAddonDB.settings.sharing == true)
     ShowEverything()
     Fire("PLAYER_LOGIN")
     Advance(2)
@@ -320,14 +322,15 @@ test("xp isn't sent to friends who haven't shown they run the addon", function()
 end)
 
 test("a hello from a friend gets a reply by the same route", function()
+    Advance(11) -- lets a held-back status go out first
     sent = {}
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~H", "WHISPER", 55)
-    Advance(5)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~H", "WHISPER", 55)
+    Advance(1)
     assert(Sent("BN", SEP_S) == 1)
 end)
 
 test("a Battle.net status adds a row and a working tooltip", function()
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~S~100~41~50000~100000~1000~MAGE~Mira Vale~Desolace", "WHISPER", 55)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~S~100~41~50000~100000~1000~MAGE~Mira Vale~Desolace", "WHISPER", 55)
     Advance(1)
     local row = RowNames()["Mira Vale"]
     assert(row, "row")
@@ -361,7 +364,23 @@ test("the zone is only sent when shared", function()
     ns.settings.shareZone = false
 end)
 
+--- For tests counting exact sends or requests, which the status and guild roster
+--- tickers would throw off.
+local function WithoutRegularUpdates(fn)
+    local paused = {}
+    for _, ticker in ipairs(tickers) do
+        if ticker.every == REGULAR_UPDATE_SECONDS then
+            ticker.at = math.huge
+            paused[#paused + 1] = ticker
+        end
+    end
+    Advance(11) -- lets a held-back status go out first
+    fn()
+    for _, ticker in ipairs(paused) do ticker.at = clock + REGULAR_UPDATE_SECONDS end
+end
+
 test("completed quests are read from the log, sent, and rescanned when they change", function()
+    WithoutRegularUpdates(function()
     sent = {}
     questLog[1].complete = true
     Fire("QUEST_LOG_UPDATE")
@@ -378,10 +397,11 @@ test("completed quests are read from the log, sent, and rescanned when they chan
     Fire("QUEST_LOG_UPDATE")
     Advance(10)
     assert(Sent("BN", "~0$") == 1, "turned in, so back to none")
+    end)
 end)
 
 test("the bar shows current xp, then finished quests, then rested", function()
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~S~110~41~50000~100000~10000~MAGE~Mira Vale~~20000", "WHISPER", 55)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~S~110~41~50000~100000~10000~MAGE~Mira Vale~~20000", "WHISPER", 55)
     Advance(1)
     local row = RowNames()["Mira Vale"]
     local whole = row.barWidth
@@ -405,38 +425,38 @@ test("the bar shows current xp, then finished quests, then rested", function()
     assert(row.extra:GetText() == "", "no quest text on the row")
 
     -- Together they can't run past the end of the bar.
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~S~111~41~50000~100000~10000~MAGE~Mira Vale~~90000", "WHISPER", 55)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~S~111~41~50000~100000~10000~MAGE~Mira Vale~~90000", "WHISPER", 55)
     Advance(1)
     assert(near(row.quest.width, whole * 0.5), "quest stops at the end")
     assert(not row.rest.shown, "no room left for rested")
 
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~S~112~41~50000~100000~0~MAGE~Mira Vale~~0", "WHISPER", 55)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~S~112~41~50000~100000~0~MAGE~Mira Vale~~0", "WHISPER", 55)
     Advance(1)
     assert(not row.quest.shown and not row.rest.shown, "empty segments hide")
 end)
 
 test("a guildmate lands in the guild group, and senders can't impersonate", function()
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~S~200~44~1~100~0~MAGE~Joss Harrow", "GUILD", "Joss Harrow")
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~S~201~60~1~100~0~MAGE~Mira Vale", "GUILD", "Joss Harrow")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~200~44~1~100~0~MAGE~Joss Harrow", "GUILD", "Joss Harrow")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~201~60~1~100~0~MAGE~Mira Vale", "GUILD", "Joss Harrow")
     Advance(1)
     assert(RowNames()["Joss Harrow"], "guild row")
-    assert(ns.Roster:GroupOf(DingAddonDB.peers["joss harrow"]) == "guild")
-    assert(DingAddonDB.peers["mira vale"].level == 41, "impersonation refused")
+    assert(ns.Roster:GroupOf(DingusAddonDB.peers["joss harrow"]) == "guild")
+    assert(DingusAddonDB.peers["mira vale"].level == 41, "impersonation refused")
 end)
 
 test("whispers from non-friends and our own echoes are ignored", function()
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~S~300~10~1~100~0~MAGE~Stranger Danger", "WHISPER", "Stranger Danger")
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~S~301~10~1~100~0~MAGE~Ana Smith", "GUILD", "Ana Smith")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~300~10~1~100~0~MAGE~Stranger Danger", "WHISPER", "Stranger Danger")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~301~10~1~100~0~MAGE~Ana Smith", "GUILD", "Ana Smith")
     Fire("CHAT_MSG_ADDON", "OtherAddon", "1~S~302~10~1~100~0~MAGE~Joss Harrow", "GUILD", "Joss Harrow")
     Advance(1)
-    assert(not DingAddonDB.peers["stranger danger"])
-    assert(not DingAddonDB.peers["ana smith"])
-    assert(DingAddonDB.peers["joss harrow"].level == 44, "other prefix ignored")
+    assert(not DingusAddonDB.peers["stranger danger"])
+    assert(not DingusAddonDB.peers["ana smith"])
+    assert(DingusAddonDB.peers["joss harrow"].level == 44, "other prefix ignored")
 end)
 
 test("a character friend's whisper route works", function()
     sent = {}
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~H", "WHISPER", "Tomas Reed")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~H", "WHISPER", "Tomas Reed")
     Advance(2)
     assert(Sent("WHISPER", SEP_S) == 1)
     assert(sent[1].target == "Tomas Reed")
@@ -471,8 +491,8 @@ test("share switches stop what they name", function()
     sent = {}
     ns.settings.sharing = false
     Fire("PLAYER_XP_UPDATE")
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~H", "WHISPER", 55)
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~H", "GUILD", "Joss Harrow")
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~H", "WHISPER", 55)
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~H", "GUILD", "Joss Harrow")
     Advance(10)
     assert(#sent == 0, "master switch: " .. #sent)
     ns.settings.sharing = true
@@ -494,6 +514,7 @@ test("a backlog of status updates coalesces, and lockdown holds sends", function
 end)
 
 test("a throttled send is retried, not lost", function()
+    WithoutRegularUpdates(function()
     local original = C_ChatInfo.SendAddonMessage
     local refusals = 2
     C_ChatInfo.SendAddonMessage = function(...)
@@ -508,10 +529,11 @@ test("a throttled send is retried, not lost", function()
     Advance(30)
     C_ChatInfo.SendAddonMessage = original
     assert(Sent("GUILD", "^1~S~999") == 1, "delivered after retries")
+    end)
 end)
 
 test("a friend who logs off is dimmed and shows how long ago", function()
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~S~1000~42~1~100000~0~MAGE~Mira Vale", "WHISPER", 55)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~S~1000~42~1~100000~0~MAGE~Mira Vale", "WHISPER", 55)
     Advance(1)
     assert(RowNames()["Mira Vale"].level:GetText() == 42)
     C_BattleNet.GetFriendNumGameAccounts = function() return 0 end
@@ -528,8 +550,8 @@ test("a friend who logs off is dimmed and shows how long ago", function()
 end)
 
 test("the saved record survives into a new session's shape", function()
-    assert(DingAddonDB.peers["mira vale"].key == "mira vale")
-    assert(DingAddonDB.peers["mira vale"].account == "Mira#1")
+    assert(DingusAddonDB.peers["mira vale"].key == "mira vale")
+    assert(DingusAddonDB.peers["mira vale"].account == "Mira#1")
 end)
 
 test("left-click whispers by Battle.net account", function()
@@ -639,7 +661,7 @@ test("each section folds on its own, shows its count, and drags the panel", func
     -- Growing upward, folding still holds the top edge (the fake panel's is 700).
     local main
     for _, frame in ipairs(frames) do
-        if frame.frameName == "DingFrame" then main = frame end
+        if frame.frameName == "DingusFrame" then main = frame end
     end
     ns.settings.growUp = true
     ns.UI:ApplySettings()
@@ -676,8 +698,8 @@ test("party members with the addon get their own section, and nobody else does",
     assert(Sent("PARTY", "^1~H$") == 1, "hello on joining")
 
     -- Rhea runs the addon and isn't a friend; the unnamed third member doesn't run it.
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~S~600~40~1~100~0~MAGE~Rhea Stone", "PARTY", "Rhea Stone")
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~S~601~44~1~100~0~MAGE~Joss Harrow", "PARTY", "Joss Harrow")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~600~40~1~100~0~MAGE~Rhea Stone", "PARTY", "Rhea Stone")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~601~44~1~100~0~MAGE~Joss Harrow", "PARTY", "Joss Harrow")
     Advance(1)
     local list = ns.Tracker:BuildList()
     local function has(entries, key)
@@ -700,8 +722,8 @@ test("party members with the addon get their own section, and nobody else does",
     end
 
     sent = {}
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~H", "PARTY", "Rhea Stone")
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~H", "PARTY", "Joss Harrow")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~H", "PARTY", "Rhea Stone")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~H", "PARTY", "Joss Harrow")
     Advance(6)
     assert(Sent("PARTY", SEP_S) == 1, "many hellos, one reply")
 
@@ -730,13 +752,13 @@ test("party members with the addon get their own section, and nobody else does",
     group.members.party1.secret = true
     Fire("GROUP_ROSTER_UPDATE")
     Advance(3)
-    assert(ns.Roster:GroupOf(DingAddonDB.peers["rhea stone"]) == "party", "kept while unreadable")
+    assert(ns.Roster:GroupOf(DingusAddonDB.peers["rhea stone"]) == "party", "kept while unreadable")
     group.members.party1.secret = nil
 
     group.members.party1.connected = false
     Fire("UNIT_CONNECTION")
     Advance(3)
-    assert(ns.Roster:OnlineState(DingAddonDB.peers["rhea stone"]) == false, "disconnected")
+    assert(ns.Roster:OnlineState(DingusAddonDB.peers["rhea stone"]) == false, "disconnected")
 
     -- A Dungeon Finder group talks on another channel.
     group.home, group.instance = false, true
@@ -745,8 +767,8 @@ test("party members with the addon get their own section, and nobody else does",
     Advance(10)
     assert(Sent("INSTANCE_CHAT", SEP_S) == 1, "instance channel")
     assert(Sent("PARTY", SEP_S) == 0, "not party")
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~S~602~41~1~100~0~MAGE~Rhea Stone", "INSTANCE_CHAT", "Rhea Stone")
-    assert(DingAddonDB.peers["rhea stone"].level == 41, "heard there too")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~602~41~1~100~0~MAGE~Rhea Stone", "INSTANCE_CHAT", "Rhea Stone")
+    assert(DingusAddonDB.peers["rhea stone"].level == 41, "heard there too")
 
     -- Raids stay out of it.
     group.instance, group.raid = false, true
@@ -761,13 +783,13 @@ test("party members with the addon get their own section, and nobody else does",
     Fire("GROUP_ROSTER_UPDATE")
     Advance(3)
     assert(not RowNames()["Rhea Stone"], "stranger gone")
-    assert(ns.Roster:GroupOf(DingAddonDB.peers["joss harrow"]) == "guild", "guildmate back")
+    assert(ns.Roster:GroupOf(DingusAddonDB.peers["joss harrow"]) == "guild", "guildmate back")
 end)
 
 test("sections with nobody in them don't show, and rows can drag the panel", function()
     local main, buttons = nil, {}
     for _, frame in ipairs(frames) do
-        if frame.frameName == "DingFrame" then main = frame end
+        if frame.frameName == "DingusFrame" then main = frame end
         if frame.kind == "Button" and frame.scripts.OnDragStart and not frame.track then
             buttons[#buttons + 1] = frame
         end
@@ -822,6 +844,7 @@ test("every bar text, colour, sort and visibility setting renders", function()
     Check("font", { "default", "names", "damage" })
     Check("sortBy", { "level", "progress", "name", "recent" })
     Check("growUp", { true, false })
+    Check("shown", { false, true })
     Check("showSelf", { false, true })
     Check("showGuild", { false, true })
     Check("showParty", { false, true })
@@ -837,7 +860,7 @@ end)
 test("growing upward holds the bottom edge, and switching doesn't move the panel", function()
     local main
     for _, frame in ipairs(frames) do
-        if frame.frameName == "DingFrame" then main = frame end
+        if frame.frameName == "DingusFrame" then main = frame end
     end
     local s = ns.settings
 
@@ -873,7 +896,7 @@ test("the row limit shows how many are left out", function()
 end)
 
 test("a max-level player renders full, with no XP lines", function()
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~S~900~60~0~0~0~MAGE~Joss Harrow", "GUILD", "Joss Harrow")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~900~60~0~0~0~MAGE~Joss Harrow", "GUILD", "Joss Harrow")
     Advance(1)
     local row = RowNames()["Joss Harrow"]
     assert(row.percent:GetText() == "Max", tostring(row.percent:GetText()))
@@ -907,10 +930,22 @@ end)
 
 test("by default only online friends below max level are listed and counted", function()
     local defaults = ns.InitDB({}).settings
-    for _, key in ipairs({ "showSelf", "showOffline", "showMaxLevel", "showGuild", "alertToast" }) do
+    for _, key in ipairs({ "showOffline", "showMaxLevel", "showGuild", "alertToast" }) do
         assert(defaults[key] == false, key .. " should be off")
     end
     assert(defaults.opacity == 0, "no background")
+    assert(defaults.shown == true and defaults.showSelf == true, "panel and own bar on")
+    local main
+    for _, frame in ipairs(frames) do
+        if frame.frameName == "DingusFrame" then main = frame end
+    end
+    ShowEverything()
+    ns.settings.shown = false
+    ns.UI:ApplySettings()
+    assert(not main.shown, "unticking hides the panel")
+    ns.settings.shown = true
+    ns.UI:ApplySettings()
+    assert(main.shown, "ticking shows it again")
     assert(defaults.showParty == true and defaults.shareParty == true, "party on")
     local s = ns.settings
     s.showSelf, s.showOffline, s.showMaxLevel, s.showGuild = false, false, false, false
@@ -928,13 +963,96 @@ test("by default only online friends below max level are listed and counted", fu
     ns.UI:ApplySettings()
 end)
 
+test("status goes out at most once every 10 seconds, and every 30 when idle", function()
+    WithoutRegularUpdates(function()
+    sent = {}
+    for _ = 1, 40 do
+        Fire("PLAYER_XP_UPDATE")
+        Advance(1)
+    end
+    local busy = Sent("GUILD", SEP_S)
+    assert(busy >= 4 and busy <= 5, "constant xp, 40 seconds: " .. busy)
+
+    Advance(21) -- one held-back status, then a full gap after it
+    sent = {}
+    Fire("PLAYER_LEVEL_UP")
+    Advance(2)
+    assert(Sent("GUILD", SEP_S) == 1, "a level-up goes out promptly after a quiet spell")
+    Fire("PLAYER_LEVEL_UP")
+    Advance(2)
+    assert(Sent("GUILD", SEP_S) == 1, "a second one waits for the limit")
+    Advance(9)
+    assert(Sent("GUILD", SEP_S) == 2, "then goes out")
+    end)
+
+    Advance(11)
+    sent = {}
+    Advance(90)
+    assert(Sent("GUILD", SEP_S) == 3, "idle, 90 seconds: " .. Sent("GUILD", SEP_S))
+end)
+
+test("a guildmate going offline is picked up from the game's presence event", function()
+    WithoutRegularUpdates(function()
+    local requests = 0
+    local online = true
+    C_GuildInfo.GuildRoster = function() requests = requests + 1 end
+    GetGuildRosterInfo = function() return "Joss Harrow", nil, nil, 44, nil, nil, nil, nil, online end
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~5000~44~1~100000~0~ROGUE~Joss Harrow", "GUILD", "Joss Harrow")
+    Advance(11)
+    Fire("GUILD_ROSTER_UPDATE")
+    Advance(2)
+    local peer = DingusAddonDB.peers["joss harrow"]
+    assert(ns.Roster:OnlineState(peer) == true, "online to start with")
+
+    Advance(11)
+    requests = 0
+    online = false
+    Fire("CLUB_MEMBER_PRESENCE_UPDATED", 1, 2, 0)
+    assert(requests == 1, "asks straight away: " .. requests)
+    Fire("CLUB_MEMBER_PRESENCE_UPDATED", 1, 3, 0)
+    Fire("CLUB_MEMBER_PRESENCE_UPDATED", 1, 4, 0)
+    assert(requests == 1, "the limit holds a burst back")
+    Fire("GUILD_ROSTER_UPDATE")
+    Advance(2)
+    assert(ns.Roster:OnlineState(peer) == false, "offline without waiting for a timeout")
+    Advance(10)
+    assert(requests == 2, "the held-back request isn't lost: " .. requests)
+
+    C_GuildInfo.GuildRoster = noop
+    GetGuildRosterInfo = function() return "Joss Harrow", nil, nil, 44, nil, nil, nil, nil, true end
+    Fire("GUILD_ROSTER_UPDATE")
+    Advance(2)
+    end)
+end)
+
+test("the message timeout is only a last resort", function()
+    local peers = DingusAddonDB.peers
+    peers["nola wren"] = { key = "nola wren", name = "Nola Wren", guild = "Test Guild", class = "MAGE",
+        level = 10, xp = 1, xpMax = 100, seen = time() }
+    local function Entry()
+        for _, entry in ipairs(ns.Tracker:BuildList().guild) do
+            if entry.peer.key == "nola wren" then return entry end
+        end
+    end
+    assert(ns.Roster:OnlineState(peers["nola wren"]) == nil, "not on any list")
+    assert(Entry().online, "recent message")
+    Advance(91)
+    assert(not Entry().online, "silent too long")
+    peers["nola wren"] = nil
+    ns.UI:ApplySettings()
+end)
+
 test("slash commands", function()
-    local slash = SlashCmdList.DING
+    local slash = SlashCmdList.DINGUS
+    local opened = 0
+    local openToCategory = Settings.OpenToCategory
+    Settings.OpenToCategory = function() opened = opened + 1 end
     slash("")
-    assert(ns.settings.shown == false, "hidden")
-    slash("")
-    assert(ns.settings.shown == true, "shown")
+    assert(opened == 1, "/dingus opens settings")
+    assert(ns.settings.shown == true, "/dingus leaves the panel alone")
     slash("options")
+    assert(opened == 2, "/dingus options still works")
+    Settings.OpenToCategory = openToCategory
     slash("reset")
     assert(ns.settings.anchor == nil)
     slash("help")
@@ -944,48 +1062,48 @@ end)
 
 test("diag reports a reply", function()
     printed = {}
-    SlashCmdList.DING("diag")
+    SlashCmdList.DINGUS("diag")
     Advance(1)
     local nonce
     for _, message in ipairs(sent) do
         nonce = message.text:match("^1~D~(%d+)$") or nonce
     end
     assert(nonce, "ping sent")
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~E~" .. nonce, "WHISPER", 55)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~E~" .. nonce, "WHISPER", 55)
     Advance(10)
     assert(table.concat(printed, "\n"):find("Battle.net reached Mira Vale", 1, true), table.concat(printed, "\n"))
 end)
 
 test("a ping gets answered, and malformed text is only counted", function()
     sent = {}
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "1~D~77", "WHISPER", 55)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~D~77", "WHISPER", 55)
     Advance(2)
     assert(Sent("BN", "^1~E~77$") == 1)
     local before = ns.Comm.stats.rejected
-    Fire("BN_CHAT_MSG_ADDON", "DingXP", "not a message", "WHISPER", 55)
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "not a message", "WHISPER", 55)
     assert(ns.Comm.stats.rejected == before + 1)
 end)
 
 test("demo mode shows samples, levels one up, and leaves saved data alone", function()
     local peersBefore = {}
-    for key in pairs(DingAddonDB.peers) do peersBefore[key] = true end
-    SlashCmdList.DING("demo")
+    for key in pairs(DingusAddonDB.peers) do peersBefore[key] = true end
+    SlashCmdList.DINGUS("demo")
     Advance(1)
     assert(RowNames()["Tomas Reed"] and RowNames()["Ana Smith"] and RowNames()["Wren Alder"], "rows")
     assert(RowNames()["Rhea Stone"], "party row")
     Advance(30)
     local mira = RowNames()["Mira Vale"]
     assert(mira and mira.level:GetText() >= 42, "levelled up")
-    SlashCmdList.DING("demo")
+    SlashCmdList.DINGUS("demo")
     Advance(1)
     assert(not RowNames()["Wren Alder"], "demo off")
-    for key in pairs(DingAddonDB.peers) do assert(peersBefore[key], "demo saved " .. key) end
+    for key in pairs(DingusAddonDB.peers) do assert(peersBefore[key], "demo saved " .. key) end
 end)
 
 test("the not-found message is hidden only just after an addon whisper", function()
     local text = "No player named 'Tomas Reed' is currently playing."
     Advance(5)
-    Fire("CHAT_MSG_ADDON", "DingXP", "1~H", "WHISPER", "Tomas Reed")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~H", "WHISPER", "Tomas Reed")
     Advance(0.6)
     assert(chatFilter(nil, nil, text) == true, "hidden")
     assert(chatFilter(nil, nil, "Something else") == false, "other text kept")

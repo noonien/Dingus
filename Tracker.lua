@@ -8,10 +8,10 @@ ns.Tracker = Tracker
 local Protocol = ns.Protocol
 local Plain = ns.Plain
 
-local STATUS_DEBOUNCE = 5
+local STATUS_MIN_GAP = 10
 local LEVEL_DEBOUNCE = 1
-local HEARTBEAT_SECONDS = 300
-local ONLINE_WINDOW = 660       -- two missed heartbeats and a bit
+local HEARTBEAT_SECONDS = 30
+local ONLINE_WINDOW = 90        -- last resort, for someone the game's own lists don't cover
 local PEER_KEEP_SECONDS = 90 * 86400
 local ALERT_MAX_GAP = 900       -- a level gained while unseen isn't news
 local QUEST_SCAN_DELAY = 1      -- QUEST_LOG_UPDATE comes in bursts
@@ -140,6 +140,7 @@ local runtimes = {} -- key -> { rate, lastSeq }
 local me
 local seq = 0
 local statusTimerPending = false
+local lastStatusSent
 local questScanPending = false
 local demo
 
@@ -206,23 +207,30 @@ function Tracker:EncodeOwnStatus()
     })
 end
 
-function Tracker:SendStatus()
-    ns.Comm:BroadcastStatus(self:EncodeOwnStatus())
+local function SendStatusNow()
+    lastStatusSent = GetTime()
+    ns.Comm:BroadcastStatus(Tracker:EncodeOwnStatus())
 end
 
---- Sends our status soon. Waiting a moment folds a run of kills into one message.
-function Tracker:MarkDirty(delay)
+--- Sends our status to everyone, at most once per STATUS_MIN_GAP. Anything asked
+--- for sooner waits, so a run of kills folds into one message with the latest XP.
+function Tracker:SendStatus()
     if statusTimerPending then return end
+    local wait = lastStatusSent and lastStatusSent + STATUS_MIN_GAP - GetTime() or 0
+    if wait <= 0 then
+        SendStatusNow()
+        return
+    end
     statusTimerPending = true
-    C_Timer.After(delay or STATUS_DEBOUNCE, function()
+    C_Timer.After(wait, function()
         statusTimerPending = false
-        Tracker:SendStatus()
+        SendStatusNow()
     end)
 end
 
 local function OnOwnChange()
     Snapshot()
-    Tracker:MarkDirty()
+    Tracker:SendStatus()
     ns.UI:Refresh()
 end
 
@@ -251,7 +259,7 @@ local function OnQuestLogUpdate()
         local total = ReadCompletedQuestXP()
         if total ~= me.questXP then
             me.questXP = total
-            Tracker:MarkDirty()
+            Tracker:SendStatus()
             ns.UI:Refresh()
         end
     end)
@@ -390,7 +398,7 @@ function Tracker:BuildList()
 end
 
 --------------------------------------------------------------------------------
--- /ding demo: sample players for trying the panel alone. Never saved.
+-- /dingus demo: sample players for trying the panel alone. Never saved.
 --------------------------------------------------------------------------------
 
 local DEMO_TICK = 3

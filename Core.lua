@@ -23,7 +23,7 @@ ns.DEFAULTS = {
 
     -- Rows
     sortBy = "level",
-    showSelf = false,
+    showSelf = true,
     showOffline = false,
     showMaxLevel = false,
     showGuild = false,
@@ -87,6 +87,16 @@ function ns.InitDB(db)
         db.settings.showGuild = nil
         db.schema = 5
     end
+    if db.schema < 6 then
+        -- /dingus used to hide the panel without saying so. It's a checkbox now, so start visible.
+        db.settings.shown = nil
+        db.schema = 6
+    end
+    if db.schema < 7 then
+        -- The own bar was off by default, which left the panel empty with nobody else listed.
+        db.settings.showSelf = nil
+        db.schema = 7
+    end
     for key, value in pairs(ns.DEFAULTS) do
         if db.settings[key] == nil then db.settings[key] = CopyDefault(value) end
     end
@@ -128,8 +138,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         if ... == addonName then
             self:UnregisterEvent("ADDON_LOADED")
-            DingAddonDB = DingAddonDB or {}
-            ns.db = ns.InitDB(DingAddonDB)
+            DingusAddonDB = DingusAddonDB or {}
+            ns.db = ns.InitDB(DingusAddonDB)
             ns.settings = ns.db.settings
         end
         return

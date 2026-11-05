@@ -804,7 +804,7 @@ end
 --------------------------------------------------------------------------------
 
 local function BuildFrame()
-    frame = CreateFrame("Frame", "DingFrame", UIParent)
+    frame = CreateFrame("Frame", "DingusFrame", UIParent)
     frame:SetFrameStrata("LOW")
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
@@ -837,10 +837,4 @@ function UI:Start()
     end
     -- Keeps "3h" and the online state current when no messages arrive.
     C_Timer.NewTicker(UPDATE_SECONDS, function() UI:Refresh() end)
-end
-
-function UI:Toggle()
-    ns.settings.shown = not ns.settings.shown
-    Render()
-    return ns.settings.shown
 end

@@ -22,7 +22,7 @@ local function Set(key, value)
 end
 
 local function OnPrivacyChanged()
-    -- Sends right away, so a changed zone setting reaches friends quickly.
+    -- Sends as soon as the limit allows, so a changed zone setting reaches friends quickly.
     ns.Tracker:SendStatus()
 end
 
@@ -198,7 +198,7 @@ local function BuildPanel()
 
     local titleText = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     titleText:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -16)
-    titleText:SetText("Ding")
+    titleText:SetText("Dingus")
 
     local scroll = CreateFrame("ScrollFrame", nil, panel)
     scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -44)
@@ -258,6 +258,7 @@ local function BuildPanel()
     right:Check("Show party members", "showParty")
 
     right:Heading("Visibility")
+    right:Check("Show the panel", "shown")
     right:Check("Hide in combat", "hideInCombat")
     right:Check("Hide in instances", "hideInInstance")
     right:Check("Hide when nobody else is listed", "hideWhenAlone")
@@ -267,10 +268,10 @@ local function BuildPanel()
     right:Check("Share my XP", "sharing", "Off stops all your XP messages. You still see other players' XP.", OnPrivacyChanged)
     right:Check("Share with friends", "shareFriends", nil, OnPrivacyChanged)
     right:Check("Share with my guild", "shareGuild",
-        "A guild message reaches every guildmate running Ding. Stopping sharing with one person can't apply here, so someone you excluded who is in your guild only stops seeing your XP with this off.",
+        "A guild message reaches every guildmate running Dingus. Stopping sharing with one person can't apply here, so someone you excluded who is in your guild only stops seeing your XP with this off.",
         OnPrivacyChanged)
     right:Check("Share with my party", "shareParty",
-        "A party message reaches every member running Ding, including anyone you stopped sharing with.",
+        "A party message reaches every member running Dingus, including anyone you stopped sharing with.",
         OnPrivacyChanged)
     right:Check("Share my zone", "shareZone", "Adds your current zone to what you share.", OnPrivacyChanged)
     right:Action("Show hidden players again", "Lists everyone you hid with the row's right-click menu again.", function()
@@ -297,21 +298,18 @@ function Options:Open()
 end
 
 local function PrintHelp()
-    ns.Print("/ding: show or hide the panel")
-    ns.Print("/ding options: open settings (or right-click a section header)")
-    ns.Print("/ding demo: fill the panel with sample players")
-    ns.Print("/ding reset: move the panel back to its starting position")
-    ns.Print("/ding diag: test which message routes reach other players")
+    ns.Print("/dingus: open settings (or right-click a section header)")
+    ns.Print("/dingus demo: fill the panel with sample players")
+    ns.Print("/dingus reset: move the panel back to its starting position")
+    ns.Print("/dingus diag: test which message routes reach other players")
 end
 
 local function HandleSlash(input)
     local command = (input or ""):lower():match("^%s*(%S*)")
-    if command == "" then
-        ns.UI:Toggle()
-    elseif command == "options" or command == "config" then
+    if command == "" or command == "options" or command == "config" then
         Options:Open()
     elseif command == "demo" then
-        ns.Print(ns.Tracker:ToggleDemo() and "Demo on. /ding demo turns it off." or "Demo off.")
+        ns.Print(ns.Tracker:ToggleDemo() and "Demo on. /dingus demo turns it off." or "Demo off.")
     elseif command == "reset" then
         ns.UI:ResetPosition()
     elseif command == "diag" then
@@ -322,12 +320,12 @@ local function HandleSlash(input)
 end
 
 function Options:Start()
-    SLASH_DING1 = "/ding"
-    SlashCmdList.DING = HandleSlash
+    SLASH_DINGUS1 = "/dingus"
+    SlashCmdList.DINGUS = HandleSlash
 
     if Settings and Settings.RegisterCanvasLayoutCategory then
         local panel = BuildPanel()
-        category = Settings.RegisterCanvasLayoutCategory(panel, "Ding")
+        category = Settings.RegisterCanvasLayoutCategory(panel, "Dingus")
         Settings.RegisterAddOnCategory(category)
     end
 end

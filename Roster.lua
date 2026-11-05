@@ -9,7 +9,8 @@ local Protocol = ns.Protocol
 local Plain = ns.Plain
 
 local REFRESH_DELAY = 1
-local GUILD_REQUEST_SECONDS = 60
+local GUILD_REQUEST_SECONDS = 30 -- a backstop: presence events ask sooner
+local GUILD_REQUEST_MIN_GAP = 10 -- the server ignores requests closer together than about this
 
 local routes = {}       -- every online friend we can send to
 local accounts = {}     -- battleTag -> { accountName, chars = { names online } }
@@ -19,6 +20,8 @@ local guildOnline = {}  -- first name -> online
 local party = {}        -- { name, connected }, the other members of a party, not a raid
 local guildName
 local refreshPending = false
+local lastGuildRequest
+local guildRequestPending = false
 
 local function Read(fn, ...)
     if not fn then return nil end
@@ -130,6 +133,34 @@ local function ScheduleRefresh()
     end)
 end
 
+local function SendGuildRequest()
+    lastGuildRequest = GetTime()
+    pcall(C_GuildInfo.GuildRoster)
+end
+
+--- Asks for a fresh guild roster, which arrives as GUILD_ROSTER_UPDATE. A request
+--- too soon after the last waits rather than being lost to the server's limit.
+local function RequestGuild()
+    if guildRequestPending or not (IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster) then return end
+    local wait = lastGuildRequest and lastGuildRequest + GUILD_REQUEST_MIN_GAP - GetTime() or 0
+    if wait <= 0 then
+        SendGuildRequest()
+        return
+    end
+    guildRequestPending = true
+    C_Timer.After(wait, function()
+        guildRequestPending = false
+        SendGuildRequest()
+    end)
+end
+
+--- Registering an event the client doesn't have raises an error.
+local function OnIfValid(event, handler)
+    if C_EventUtils and C_EventUtils.IsEventValid and C_EventUtils.IsEventValid(event) then
+        ns.On(event, handler)
+    end
+end
+
 function Roster:Start()
     for _, event in ipairs({
         "FRIENDLIST_UPDATE", "BN_FRIEND_INFO_CHANGED", "BN_FRIEND_LIST_SIZE_CHANGED", "BN_CONNECTED",
@@ -138,10 +169,11 @@ function Roster:Start()
     }) do
         ns.On(event, ScheduleRefresh)
     end
+    OnIfValid("BN_FRIEND_ACCOUNT_ONLINE", ScheduleRefresh)
+    OnIfValid("BN_FRIEND_ACCOUNT_OFFLINE", ScheduleRefresh)
+    -- Also fires for communities, which the request limit keeps cheap.
+    OnIfValid("CLUB_MEMBER_PRESENCE_UPDATED", RequestGuild)
     if C_FriendList and C_FriendList.ShowFriends then pcall(C_FriendList.ShowFriends) end
-    local function RequestGuild()
-        if IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then pcall(C_GuildInfo.GuildRoster) end
-    end
     RequestGuild()
     C_Timer.NewTicker(GUILD_REQUEST_SECONDS, RequestGuild)
     ScheduleRefresh()
