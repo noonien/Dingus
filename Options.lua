@@ -17,8 +17,13 @@ local refreshers = {}
 local category
 
 local function Set(key, value)
+    if key == "growUp" then ns.UI:HoldPosition() end
     ns.settings[key] = value
     ns.UI:ApplySettings()
+end
+
+local function RefreshControls()
+    for _, refresh in ipairs(refreshers) do refresh() end
 end
 
 local function OnPrivacyChanged()
@@ -243,6 +248,11 @@ local function BuildPanel()
         { id = "pinned", label = "Pinned only" },
     })
 
+    left:Heading("Reset")
+    left:Action("Reset to defaults",
+        "Pinned and hidden players, the panel's position and your privacy settings stay as they are.",
+        function() StaticPopup_Show("DINGUS_RESET") end)
+
     local right = Column(content, COLUMN_WIDTH + COLUMN_GAP)
     right:Heading("Rows")
     right:Cycle("Sort by", "sortBy", {
@@ -283,9 +293,7 @@ local function BuildPanel()
     end)
 
     content:SetHeight(-math.min(left:Bottom(), right:Bottom()) + 8)
-    panel:SetScript("OnShow", function()
-        for _, refresh in ipairs(refreshers) do refresh() end
-    end)
+    panel:SetScript("OnShow", RefreshControls)
     return panel
 end
 
@@ -322,6 +330,20 @@ end
 function Options:Start()
     SLASH_DINGUS1 = "/dingus"
     SlashCmdList.DINGUS = HandleSlash
+
+    StaticPopupDialogs.DINGUS_RESET = {
+        text = "Reset Dingus to its default settings?\n\nPinned and hidden players, the panel's position and your privacy settings stay as they are.",
+        button1 = YES,
+        button2 = NO,
+        OnAccept = function()
+            ns.ResetSettings()
+            ns.UI:ApplySettings()
+            RefreshControls()
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+    }
 
     if Settings and Settings.RegisterCanvasLayoutCategory then
         local panel = BuildPanel()

@@ -272,5 +272,28 @@ test("a new install gets the defaults, and saved settings stay", function()
     eq(saved.barHeight, 22, "a missing setting gets its default")
 end)
 
+test("only what the player set is saved, and a changed default reaches the rest", function()
+    local db = ns.InitDB({})
+    local settings = db.settings
+    eq(rawget(settings, "width"), nil)
+    settings.barHeight = 30
+    settings.locked = ns.DEFAULTS.locked
+    eq(rawget(settings, "barHeight"), 30)
+    eq(rawget(settings, "locked"), false, "set back to the default, it stays the player's choice")
+
+    local oldWidth, oldHeight = ns.DEFAULTS.width, ns.DEFAULTS.barHeight
+    ns.DEFAULTS.width, ns.DEFAULTS.barHeight = oldWidth + 100, oldHeight + 1
+    eq(settings.width, oldWidth + 100, "unset: follows the new default")
+    eq(settings.barHeight, 30, "set: stays")
+    ns.DEFAULTS.width, ns.DEFAULTS.barHeight = oldWidth, oldHeight
+end)
+
+test("each player's lists are their own and saved", function()
+    local a, b = ns.InitDB({}).settings, ns.InitDB({}).settings
+    a.pinned.mira = true
+    eq(rawget(a, "pinned").mira, true)
+    eq(b.pinned.mira, nil)
+end)
+
 print(("%d passed, %d failed"):format(passed, failed))
 os.exit(failed == 0 and 0 or 1)

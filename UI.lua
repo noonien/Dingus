@@ -253,8 +253,7 @@ local function IsExcluded(peer)
     return ns.settings.excluded[peer.key] ~= nil
 end
 
---- Left click gets whisper and invite. Right click adds what changes the panel.
-local function OpenMenu(row, full)
+local function OpenMenu(row)
     local entry = row.entry
     if not entry or entry.isSelf or not (MenuUtil and MenuUtil.CreateContextMenu) then return end
     local peer = entry.peer
@@ -266,7 +265,6 @@ local function OpenMenu(row, full)
         root:CreateButton("Invite", function()
             if C_PartyInfo and C_PartyInfo.InviteUnit then C_PartyInfo.InviteUnit(peer.name) end
         end):SetEnabled(online)
-        if not full then return end
         root:CreateButton(s.pinned[peer.key] and "Unpin" or "Pin to top", function()
             s.pinned[peer.key] = not s.pinned[peer.key] or nil
             UI:Refresh()
@@ -373,7 +371,7 @@ end
 local function NewRow()
     local row = CreateFrame("Button", nil, frame)
     EnableClickAndDrag(row, function(self, button)
-        OpenMenu(self, button == "RightButton")
+        if button == "RightButton" then OpenMenu(self) end
     end)
 
     row.icon = row:CreateTexture(nil, "ARTWORK")
@@ -693,13 +691,19 @@ end
 --- Reapplies settings that affect the frame's anchor as well as its contents.
 function UI:ApplySettings()
     if not frame then return end
-    -- The edge not holding the panel goes stale as its height changes, so read
-    -- both first. Switching grow direction then leaves the panel where it is.
-    if frame:GetTop() then
-        ns.settings.anchor = { left = frame:GetLeft(), top = frame:GetTop(), bottom = frame:GetBottom() }
-    end
+    -- A panel that was never moved stays unsaved, so it follows the default position.
+    if ns.settings.anchor then self:HoldPosition() end
     self:RestorePosition()
     Render()
+end
+
+--- Saves the panel's edges. The edge not holding the panel goes stale as its
+--- height changes, so both are read. Switching grow direction after this leaves
+--- the panel where it is.
+function UI:HoldPosition()
+    if frame and frame:GetTop() then
+        ns.settings.anchor = { left = frame:GetLeft(), top = frame:GetTop(), bottom = frame:GetBottom() }
+    end
 end
 
 function UI:RestorePosition()

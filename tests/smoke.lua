@@ -132,6 +132,9 @@ C_ChatInfo = {
     end,
 }
 C_EventUtils = { IsEventValid = function() return true end }
+StaticPopupDialogs = {}
+popupShown = nil
+StaticPopup_Show = function(name) popupShown = name end
 BNET_CLIENT_WOW = "WoW"
 WOW_PROJECT_ID = 99
 BNGetNumFriends = function() return 1 end
@@ -290,7 +293,8 @@ end
 test("loads and logs in", function()
     DingusAddonDB = nil
     Fire("ADDON_LOADED", "Dingus")
-    assert(DingusAddonDB.settings.sharing == true)
+    assert(ns.settings.sharing == true)
+    assert(rawget(DingusAddonDB.settings, "sharing") == nil, "defaults aren't saved")
     ShowEverything()
     Fire("PLAYER_LOGIN")
     Advance(2)
@@ -575,13 +579,23 @@ local function FakeMenu()
     return opened
 end
 
-test("left-click offers whisper and invite, and whispers by Battle.net account", function()
+test("left-click does nothing on a row", function()
+    local opened = FakeMenu()
+    whispered = nil
+    Press(RowNames()["Mira Vale"], "LeftButton")
+    assert(opened.count == 0, "no menu")
+    assert(whispered == nil, "no whisper")
+    MenuUtil = nil
+end)
+
+test("right-click offers whisper and invite, and whispers by Battle.net account", function()
     local opened = FakeMenu()
     C_PartyInfo = { InviteUnit = function(name) opened.invited = name end }
     whispered = nil
-    Press(RowNames()["Mira Vale"], "LeftButton")
+    Press(RowNames()["Mira Vale"], "RightButton")
     assert(whispered == nil, "the click alone doesn't whisper")
-    assert(table.concat(opened.labels, ",") == "Whisper,Invite", "labels: " .. table.concat(opened.labels, ","))
+    local labels = table.concat(opened.labels, ",")
+    assert(labels:find("^Whisper,Invite,Pin to top,Hide,"), "labels: " .. labels)
     opened.actions["Whisper"]()
     assert(whispered == "Mira", "whispered: " .. tostring(whispered))
     opened.actions["Invite"]()
@@ -594,7 +608,7 @@ test("left-click offers whisper and invite, and whispers by Battle.net account",
 
     local row = RowNames()["Mira Vale"]
     row.entry.online = false
-    Press(row, "LeftButton")
+    Press(row, "RightButton")
     assert(opened.enabled["Whisper"] == false and opened.enabled["Invite"] == false, "offline: greyed out")
     row.entry.online = true
     MenuUtil, C_PartyInfo = nil, nil
@@ -900,8 +914,8 @@ test("sections with nobody in them don't show, and rows can drag the panel", fun
     local opened = FakeMenu()
     Drag(row, 50)
     assert(opened.count == 0, "a drag doesn't open the menu")
-    Press(row, "LeftButton")
-    assert(opened.count == 1, "the next click does")
+    Press(row, "RightButton")
+    assert(opened.count == 1, "the next right-click does")
     MenuUtil = nil
     Drag(RowNames()["You"], 50)
     assert(ns.settings.anchor, "the own bar drags too")
@@ -955,7 +969,8 @@ test("growing upward holds the bottom edge, and switching doesn't move the panel
     assert(main.points[1][1] == "BOTTOMLEFT" and main.points[1][3] == "BOTTOMLEFT" and main.points[1][5] == 220, "default, up")
     assert(main.height == height, "same size either way")
 
-    -- The fake panel's edges are 700 and 400.
+    -- The fake panel's edges are 700 and 400. The grow checkbox holds them first.
+    ns.UI:HoldPosition()
     ns.UI:ApplySettings()
     assert(main.points[1][1] == "BOTTOMLEFT" and main.points[1][5] == 400, "up: bottom edge held")
     s.growUp = false
@@ -990,6 +1005,7 @@ test("the settings panel opens and its controls work", function()
     panel.scripts.OnShow(panel)
     local clicked = 0
     local sharing = ns.settings.sharing
+    ns.settings.anchor = nil
     for _, frame in ipairs(frames) do
         if frame.kind == "Button" and not frame.track and frame.scripts.OnClick and not frame.scripts.OnDragStart then
             frame.scripts.OnClick(frame, "LeftButton")
@@ -1001,12 +1017,48 @@ test("the settings panel opens and its controls work", function()
         end
     end
     assert(clicked > 20, "controls: " .. clicked)
+    assert(ns.settings.anchor, "the grow checkbox holds the panel where it is")
     ns.settings.sharing = sharing
     ns.db.settings = ns.InitDB({}).settings
     ns.settings = ns.db.settings
     ShowEverything()
     ns.UI:ApplySettings()
     Advance(1)
+end)
+
+test("reset restores the defaults and keeps lists, position and privacy", function()
+    assert(popupShown == "DINGUS_RESET", "the button asks first")
+    local s = ns.settings
+    s.width, s.fontSize, s.showOffline = 350, 15, true
+    s.collapsedSections.friends = true
+    s.pinned.someone, s.hidden.other, s.excluded.third = true, true, true
+    s.anchor = { left = 10, top = 500, bottom = 400 }
+    s.sharing, s.shareZone = false, true
+
+    StaticPopupDialogs.DINGUS_RESET.OnAccept()
+
+    assert(s.width == 300 and s.fontSize == 12 and s.showOffline == false, "options back")
+    assert(rawget(s, "width") == nil and rawget(s, "showOffline") == nil, "and no longer saved")
+    assert(next(s.collapsedSections) == nil, "sections unfolded")
+    assert(s.pinned.someone and s.hidden.other and s.excluded.third, "lists kept")
+    assert(s.anchor, "position kept")
+    assert(s.sharing == false and s.shareZone == true, "privacy kept")
+
+    ns.db.settings = ns.InitDB({}).settings
+    ns.settings = ns.db.settings
+    ShowEverything()
+    ns.UI:ResetPosition()
+    Advance(1)
+end)
+
+test("changing an option doesn't save the position of a panel that never moved", function()
+    ns.settings.anchor = nil
+    ns.UI:ResetPosition()
+    ns.UI:ApplySettings()
+    assert(ns.settings.anchor == nil)
+    ns.UI:HoldPosition()
+    assert(ns.settings.anchor, "grow direction holds it when asked")
+    ns.UI:ResetPosition()
 end)
 
 test("by default only online friends below max level are listed and counted", function()

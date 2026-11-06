@@ -5,7 +5,6 @@ ns.addonName = addonName
 ns.DEFAULTS = {
     -- Layout
     shown = true,
-    collapsedSections = {},
     locked = false,
     width = 300,
     barHeight = 22,
@@ -46,27 +45,43 @@ ns.DEFAULTS = {
     shareGuild = true,
     shareParty = true,
     shareZone = false,
-
-    -- Per-person lists, keyed by peer key
-    pinned = {},
-    hidden = {},
-    excluded = {},
 }
 
-local function CopyDefault(value)
-    if type(value) ~= "table" then return value end
-    local copy = {}
-    for k, v in pairs(value) do copy[k] = CopyDefault(v) end
-    return copy
-end
+-- Edited in place, so each player needs their own table rather than a default.
+local LISTS = { "collapsedSections", "pinned", "hidden", "excluded" }
 
+local KEPT_ON_RESET = {
+    anchor = true,
+    pinned = true,
+    hidden = true,
+    excluded = true,
+    sharing = true,
+    shareFriends = true,
+    shareGuild = true,
+    shareParty = true,
+    shareZone = true,
+}
+
+--- Only what the player has set is saved. Everything else reads from DEFAULTS,
+--- so a changed default reaches everyone who hasn't set that option.
 function ns.InitDB(db)
     db.settings = db.settings or {}
     db.peers = db.peers or {}
-    for key, value in pairs(ns.DEFAULTS) do
-        if db.settings[key] == nil then db.settings[key] = CopyDefault(value) end
+    for _, list in ipairs(LISTS) do
+        db.settings[list] = db.settings[list] or {}
     end
+    setmetatable(db.settings, { __index = ns.DEFAULTS })
     return db
+end
+
+--- Back to the defaults, apart from who the player listed, where they put the
+--- panel, and what they agreed to share.
+function ns.ResetSettings()
+    local settings = ns.settings
+    for key in pairs(settings) do
+        if not KEPT_ON_RESET[key] then settings[key] = nil end
+    end
+    settings.collapsedSections = {}
 end
 
 local function CopyPlain(value)
