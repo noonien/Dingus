@@ -2,7 +2,8 @@
 ## Title: Dingus
 ## Notes: See the XP of friends, party members and guildmates who also run Dingus.
 ## Author: noonien
-## Version: 0.1.0
+## IconTexture: Interface\AddOns\Dingus\Icon
+## Version: 0.1.1
 ## SavedVariables: DingusAddonDB
 
 Core.lua

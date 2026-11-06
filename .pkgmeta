@@ -2,6 +2,7 @@ package-as: Dingus
 
 ignore:
   - README.md
+  - assets
   - flake.lock
   - flake.nix
   - tests
