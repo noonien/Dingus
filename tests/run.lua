@@ -261,31 +261,30 @@ end)
 
 test("a new install gets the defaults, and saved settings stay", function()
     local defaults = ns.InitDB({}).settings
-    eq(defaults.shown, true)
-    eq(defaults.showSelf, false)
+    eq(defaults.showPanel, "always")
+    eq(defaults.ownBar, "never")
     eq(defaults.showGuild, false)
-    eq(defaults.opacity, 0)
-    local saved = ns.InitDB({ settings = { showSelf = true, opacity = 0.3, width = 350 } }).settings
-    eq(saved.showSelf, true)
-    eq(saved.opacity, 0.3)
+    eq(defaults.shareZone, true)
+    local saved = ns.InitDB({ settings = { ownBar = "always", width = 350 } }).settings
+    eq(saved.ownBar, "always")
     eq(saved.width, 350)
-    eq(saved.barHeight, 22, "a missing setting gets its default")
+    eq(saved.maxRows, 20, "a missing setting gets its default")
 end)
 
 test("only what the player set is saved, and a changed default reaches the rest", function()
     local db = ns.InitDB({})
     local settings = db.settings
     eq(rawget(settings, "width"), nil)
-    settings.barHeight = 30
+    settings.maxRows = 30
     settings.locked = ns.DEFAULTS.locked
-    eq(rawget(settings, "barHeight"), 30)
+    eq(rawget(settings, "maxRows"), 30)
     eq(rawget(settings, "locked"), false, "set back to the default, it stays the player's choice")
 
-    local oldWidth, oldHeight = ns.DEFAULTS.width, ns.DEFAULTS.barHeight
-    ns.DEFAULTS.width, ns.DEFAULTS.barHeight = oldWidth + 100, oldHeight + 1
+    local oldWidth, oldRows = ns.DEFAULTS.width, ns.DEFAULTS.maxRows
+    ns.DEFAULTS.width, ns.DEFAULTS.maxRows = oldWidth + 100, oldRows + 1
     eq(settings.width, oldWidth + 100, "unset: follows the new default")
-    eq(settings.barHeight, 30, "set: stays")
-    ns.DEFAULTS.width, ns.DEFAULTS.barHeight = oldWidth, oldHeight
+    eq(settings.maxRows, 30, "set: stays")
+    ns.DEFAULTS.width, ns.DEFAULTS.maxRows = oldWidth, oldRows
 end)
 
 test("each player's lists are their own and saved", function()

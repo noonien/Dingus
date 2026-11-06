@@ -13,7 +13,7 @@ local GUILD_REQUEST_SECONDS = 30 -- a backstop: presence events ask sooner
 local GUILD_REQUEST_MIN_GAP = 10 -- the server ignores requests closer together than about this
 
 local routes = {}       -- every online friend we can send to
-local accounts = {}     -- battleTag -> { accountName, chars = { names online } }
+local accounts = {}     -- battleTag -> { chars = { names online } }
 local charFriends = {}  -- name key -> { name, connected }
 local byGameAccount = {} -- gameAccountID -> { name, account }
 local guildOnline = {}  -- first name -> online
@@ -38,7 +38,7 @@ local function ScanBattleNet(newRoutes, newAccounts, newByGameAccount)
         local info = Read(C_BattleNet.GetFriendAccountInfo, i)
         local tag = info and Plain(info.battleTag)
         if tag then
-            local account = { accountName = Plain(info.accountName), chars = {} }
+            local account = { chars = {} }
             newAccounts[tag] = account
             local count = Read(C_BattleNet.GetFriendNumGameAccounts, i) or 0
             for j = 1, count do
@@ -250,10 +250,4 @@ function Roster:OnlineState(peer)
     local friend = FindCharFriend(peer.name)
     if friend then return friend.connected end
     return guildOnline[Protocol.FirstToken(peer.name)]
-end
-
---- The Battle.net name for opening a whisper, valid only this session.
-function Roster:AccountName(tag)
-    local account = tag and accounts[tag]
-    return account and account.accountName or nil
 end

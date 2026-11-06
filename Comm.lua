@@ -293,7 +293,7 @@ end
 
 local function CanShare(route)
     local s = ns.settings
-    if not s.sharing or Comm:IsExcluded(route) then return false end
+    if Comm:IsExcluded(route) then return false end
     if route.kind == "guild" then return s.shareGuild and IsInGuild() end
     if route.kind == "party" then
         return s.shareParty and Comm.PartyChannel() ~= nil and #ns.Roster:PartyMembers() > 0
@@ -378,7 +378,7 @@ local function Dispatch(text, route, senderName, account)
         end
         ns.Tracker:OnStatus(msg, route, account)
     elseif msg.kind == "D" then
-        if ns.settings.sharing and not Comm:IsExcluded(route) then
+        if CanShare(route) then
             Enqueue(route, Protocol.EncodePong(msg.nonce))
         end
     elseif msg.kind == "E" and diag and diag.nonce == msg.nonce then

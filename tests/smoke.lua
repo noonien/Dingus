@@ -28,6 +28,7 @@ local function NewWidget(kind)
         IsMouseOver = function() return cursorOver end,
         SetText = function(self, text) self.text = text end,
         GetText = function(self) return self.text end,
+        SetSize = function(self, width, height) self.width, self.height = width, height end,
         SetWidth = function(self, value)
             assert(type(value) == "number" and value == value, "SetWidth needs a real number")
             self.width = value
@@ -38,6 +39,9 @@ local function NewWidget(kind)
         end,
         GetStringWidth = function() return 120 end,
         GetHeight = function(self) return self.height end,
+        GetWidth = function(self) return self.width end,
+        GetFrameLevel = function() return 1 end,
+        GetEffectiveScale = function() return 1 end,
         GetTop = function() return 700 end,
         GetBottom = function() return 400 end,
         GetLeft = function() return 36 end,
@@ -80,6 +84,7 @@ CreateFrame = function(kind, name)
 end
 UIParent = NewWidget("Frame")
 UIParent.GetWidth = function() return 1920 end
+UIParent.GetHeight = function() return 1080 end
 DEFAULT_CHAT_FRAME = NewWidget("Frame")
 GameTooltip = NewWidget("GameTooltip")
 GameTooltip.AddLine = function(_, text) table.insert(tooltip, text) end
@@ -211,7 +216,7 @@ ERR_CHAT_PLAYER_NOT_FOUND_S = "No player named '%s' is currently playing."
 local chatFilter
 ChatFrame_AddMessageEventFilter = function(_, fn) chatFilter = fn end
 local whispered
-ChatFrame_SendBNetTell = function(name) whispered = name end
+ChatFrame_SendTell = function(name) whispered = name end
 SlashCmdList = {}
 local panel
 Settings = {
@@ -287,14 +292,14 @@ local SEP_S = "^1~S~"
 -- These rows are off by default; most tests need them on.
 local function ShowEverything()
     local s = ns.settings
-    s.showSelf, s.showOffline, s.showMaxLevel, s.showGuild = true, true, true, true
+    s.ownBar, s.showOffline, s.showMaxLevel, s.showGuild = "always", true, true, true
 end
 
 test("loads and logs in", function()
     DingusAddonDB = nil
     Fire("ADDON_LOADED", "Dingus")
-    assert(ns.settings.sharing == true)
-    assert(rawget(DingusAddonDB.settings, "sharing") == nil, "defaults aren't saved")
+    assert(ns.settings.shareFriends == true)
+    assert(rawget(DingusAddonDB.settings, "shareFriends") == nil, "defaults aren't saved")
     ShowEverything()
     Fire("PLAYER_LOGIN")
     Advance(2)
@@ -359,13 +364,13 @@ test("the zone is only sent when shared", function()
     sent = {}
     Fire("PLAYER_XP_UPDATE")
     Advance(10)
-    assert(Sent("BN", "Tanaris") == 0, "off by default")
-    ns.settings.shareZone = true
+    assert(Sent("BN", "Tanaris") == 1, "on by default")
+    ns.settings.shareZone = false
     sent = {}
     Fire("PLAYER_XP_UPDATE")
     Advance(10)
-    assert(Sent("BN", "Tanaris") == 1, "on")
-    ns.settings.shareZone = false
+    assert(Sent("BN", "Tanaris") == 0, "off")
+    ns.settings.shareZone = nil
 end)
 
 --- For tests counting exact sends or requests, which the status and guild roster
@@ -493,13 +498,14 @@ test("share switches stop what they name", function()
     ns.settings.shareFriends = true
 
     sent = {}
-    ns.settings.sharing = false
+    local s = ns.settings
+    s.shareFriends, s.shareGuild, s.shareParty = false, false, false
     Fire("PLAYER_XP_UPDATE")
     Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~H", "WHISPER", 55)
     Fire("CHAT_MSG_ADDON", "DingusXP", "1~H", "GUILD", "Joss Harrow")
     Advance(10)
-    assert(#sent == 0, "master switch: " .. #sent)
-    ns.settings.sharing = true
+    assert(#sent == 0, "all off: " .. #sent)
+    s.shareFriends, s.shareGuild, s.shareParty = true, true, true
 end)
 
 test("a backlog of status updates coalesces, and lockdown holds sends", function()
@@ -588,7 +594,7 @@ test("left-click does nothing on a row", function()
     MenuUtil = nil
 end)
 
-test("right-click offers whisper and invite, and whispers by Battle.net account", function()
+test("right-click offers whisper and invite, and both use the character name", function()
     local opened = FakeMenu()
     C_PartyInfo = { InviteUnit = function(name) opened.invited = name end }
     whispered = nil
@@ -597,7 +603,7 @@ test("right-click offers whisper and invite, and whispers by Battle.net account"
     local labels = table.concat(opened.labels, ",")
     assert(labels:find("^Whisper,Invite,Pin to top,Hide,"), "labels: " .. labels)
     opened.actions["Whisper"]()
-    assert(whispered == "Mira", "whispered: " .. tostring(whispered))
+    assert(whispered == "Mira Vale", "whispered: " .. tostring(whispered))
     opened.actions["Invite"]()
     assert(opened.invited == "Mira Vale")
     assert(opened.enabled["Whisper"] == true and opened.enabled["Invite"] == true, "online")
@@ -708,7 +714,7 @@ test("each section folds on its own, shows its count, and drags the panel", func
     for _, frame in ipairs(frames) do
         if frame.frameName == "DingusFrame" then main = frame end
     end
-    ns.settings.growUp = true
+    ns.settings.anchor = { left = 36, bottom = 400, up = true }
     ns.UI:ApplySettings()
     local tallest = main.height
     Click(friends)
@@ -716,7 +722,7 @@ test("each section folds on its own, shows its count, and drags the panel", func
     assert(main.points[1][1] == "BOTTOMLEFT" and main.points[1][5] == 700 - main.height, "top held folding")
     Click(friends)
     assert(main.points[1][1] == "BOTTOMLEFT" and main.points[1][5] == 700 - tallest, "top held unfolding")
-    ns.settings.growUp = false
+    ns.settings.anchor = { left = 36, top = 700 }
     ns.UI:ApplySettings()
     Click(friends)
     assert(main.points[1][1] == "TOPLEFT" and main.points[1][5] == 700, "growing down holds it anyway")
@@ -863,16 +869,16 @@ test("each person is listed once: party, then friends, then guild", function()
 
     -- "Friends only" alerts still count a friend listed under Party.
     local sound, kit = PlaySound, SOUNDKIT
-    local toastOn, soundOn, who = s.alertToast, s.alertSound, s.alertWho
+    local alertWith, who = s.alertWith, s.alertWho
     local plays = 0
     PlaySound, SOUNDKIT = function() plays = plays + 1 end, { TELL_MESSAGE = 1 }
-    s.alertToast, s.alertSound, s.alertWho = false, true, "friends"
+    s.alertWith, s.alertWho = "sound", "friends"
     ns.UI:ShowLevelUp(mira)
     assert(plays == 1, "friend in the party alerts")
     ns.UI:ShowLevelUp(rhea)
     assert(plays == 1, "stranger in the party doesn't")
     PlaySound, SOUNDKIT = sound, kit
-    s.alertToast, s.alertSound, s.alertWho = toastOn, soundOn, who
+    s.alertWith, s.alertWho = alertWith, who
 
     mira.guild = miraGuild
     group.home, group.members = false, {}
@@ -902,7 +908,10 @@ test("sections with nobody in them don't show, and rows can drag the panel", fun
     ns.UI:ApplySettings()
     assert(not friends.shown, "friends hidden when its only player is")
     assert(main.shown, "own bar still there")
-    s.showSelf = false
+    s.ownBar = "others"
+    ns.UI:ApplySettings()
+    assert(not main.shown, "own bar only with others")
+    s.ownBar = "never"
     ns.UI:ApplySettings()
     assert(not main.shown, "nothing to show, so no panel")
     s.hidden = {}
@@ -922,7 +931,7 @@ test("sections with nobody in them don't show, and rows can drag the panel", fun
     ns.UI:ResetPosition()
 end)
 
-test("every bar text, colour, sort and visibility setting renders", function()
+test("every bar text, sort and visibility setting renders", function()
     local s = ns.settings
     local function Check(key, values)
         local before = s[key]
@@ -935,48 +944,97 @@ test("every bar text, colour, sort and visibility setting renders", function()
         ns.UI:ApplySettings()
     end
     Check("barText", { "full", "percent", "level", "none" })
-    Check("barColor", { "class", "sky", "mint", "violet", "rose" })
-    Check("font", { "default", "names", "damage" })
     Check("sortBy", { "level", "progress", "name", "recent" })
-    Check("growUp", { true, false })
-    Check("shown", { false, true })
-    Check("showSelf", { false, true })
+    Check("showPanel", { "combat", "instance", "both", "never", "always" })
+    Check("ownBar", { "never", "others", "always" })
     Check("showGuild", { false, true })
     Check("showParty", { false, true })
     Check("showOffline", { false, true })
     Check("showMaxLevel", { false, true })
-    Check("hideInCombat", { true, false })
-    Check("hideInInstance", { true, false })
-    Check("hideWhenAlone", { true, false })
     Check("maxRows", { 1, 20 })
+    Check("alertWith", { "toast", "sound", "both", "off" })
     Check("alertWho", { "friends", "pinned", "all" })
 end)
 
-test("growing upward holds the bottom edge, and switching doesn't move the panel", function()
+test("the panel grows away from the nearer screen edge once moved", function()
     local main
     for _, frame in ipairs(frames) do
         if frame.frameName == "DingusFrame" then main = frame end
     end
-    local s = ns.settings
-
-    s.growUp = false
     ns.UI:ResetPosition()
     assert(main.points[1][1] == "TOPLEFT" and main.points[1][3] == "TOPLEFT" and main.points[1][5] == -220, "default, down")
-    local height = main.height
 
-    s.growUp = true
-    ns.UI:ResetPosition()
-    assert(main.points[1][1] == "BOTTOMLEFT" and main.points[1][3] == "BOTTOMLEFT" and main.points[1][5] == 220, "default, up")
-    assert(main.height == height, "same size either way")
+    -- The fake panel's edges are 700 and 400, so its middle is 550.
+    local height = UIParent.GetHeight
+    Drag(RowNames()["Mira Vale"], 50)
+    assert(main.points[1][1] == "TOPLEFT" and main.points[1][5] == 700, "upper half: top edge held")
 
-    -- The fake panel's edges are 700 and 400. The grow checkbox holds them first.
-    ns.UI:HoldPosition()
+    UIParent.GetHeight = function() return 1600 end
+    Drag(RowNames()["Mira Vale"], 50)
+    assert(main.points[1][1] == "BOTTOMLEFT" and main.points[1][5] == 400, "lower half: bottom edge held")
     ns.UI:ApplySettings()
-    assert(main.points[1][1] == "BOTTOMLEFT" and main.points[1][5] == 400, "up: bottom edge held")
-    s.growUp = false
-    ns.UI:ApplySettings()
-    assert(main.points[1][1] == "TOPLEFT" and main.points[1][5] == 700, "down: top edge held")
+    assert(main.points[1][1] == "BOTTOMLEFT", "a settings change keeps it")
+
+    UIParent.GetHeight = height
     ns.UI:ResetPosition()
+end)
+
+test("the panel resizes from its grips, and only a real change is saved", function()
+    local main, right, bottom, corner
+    for _, frame in ipairs(frames) do
+        if frame.frameName == "DingusFrame" then main = frame end
+        if frame.resizesWidth and frame.resizesRows then corner = frame
+        elseif frame.resizesWidth then right = frame
+        elseif frame.resizesRows then bottom = frame end
+    end
+    local s = ns.settings
+    s.width, s.maxRows = nil, nil
+    ns.UI:ApplySettings()
+    local function Drag(grip, dx, dy)
+        cursor.x, cursor.y = 500, 500
+        grip.scripts.OnMouseDown(grip)
+        cursor.x, cursor.y = 500 + dx, 500 + dy
+        grip.scripts.OnUpdate(grip)
+        grip.scripts.OnMouseUp(grip)
+        assert(not grip.scripts.OnUpdate, "stops following the cursor")
+    end
+
+    Drag(corner, 0, 0)
+    assert(rawget(s, "width") == nil and rawget(s, "maxRows") == nil, "a press alone saves nothing")
+
+    Drag(right, 42, -200)
+    assert(s.width == 344 and main.width == 344, "width, in steps: " .. tostring(s.width))
+    assert(rawget(s, "maxRows") == nil, "the right edge leaves rows alone")
+
+    Drag(bottom, 200, 46)
+    assert(s.width == 344, "the bottom edge leaves width alone")
+    assert(s.maxRows < 20, "rows start from what's listed, not the limit: " .. s.maxRows)
+    local rows = s.maxRows
+    Drag(bottom, 0, 23)
+    assert(s.maxRows < rows or rows == 1, "dragging up shows fewer")
+
+    Drag(right, 5000, 0)
+    assert(s.width == 420, "stops at the widest")
+    Drag(right, -5000, 0)
+    assert(s.width == 180, "and the narrowest")
+
+    corner.scripts.OnDoubleClick(corner)
+    assert(rawget(s, "width") == nil and rawget(s, "maxRows") == nil, "double-click resets the size")
+    assert(s.width == 300 and main.width == 300)
+
+    -- Hovering shows the grips unless the panel is locked.
+    cursorOver = true
+    main.scripts.OnUpdate(main, 1)
+    assert(corner.shown and right.shown and bottom.shown, "hover shows them")
+    s.locked = true
+    main.scripts.OnUpdate(main, 1)
+    assert(not corner.shown, "locked hides them")
+    s.locked = nil
+    cursorOver = false
+    main.scripts.OnUpdate(main, 1)
+    assert(not corner.shown, "leaving hides them")
+    cursorOver = true
+    ns.UI:ApplySettings()
 end)
 
 test("the row limit shows how many are left out", function()
@@ -1004,21 +1062,14 @@ end)
 test("the settings panel opens and its controls work", function()
     panel.scripts.OnShow(panel)
     local clicked = 0
-    local sharing = ns.settings.sharing
-    ns.settings.anchor = nil
     for _, frame in ipairs(frames) do
         if frame.kind == "Button" and not frame.track and frame.scripts.OnClick and not frame.scripts.OnDragStart then
             frame.scripts.OnClick(frame, "LeftButton")
             frame.scripts.OnClick(frame, "RightButton")
             clicked = clicked + 1
         end
-        if frame.kind == "Slider" then
-            frame.scripts.OnValueChanged(frame, 24)
-        end
     end
     assert(clicked > 20, "controls: " .. clicked)
-    assert(ns.settings.anchor, "the grow checkbox holds the panel where it is")
-    ns.settings.sharing = sharing
     ns.db.settings = ns.InitDB({}).settings
     ns.settings = ns.db.settings
     ShowEverything()
@@ -1029,20 +1080,20 @@ end)
 test("reset restores the defaults and keeps lists, position and privacy", function()
     assert(popupShown == "DINGUS_RESET", "the button asks first")
     local s = ns.settings
-    s.width, s.fontSize, s.showOffline = 350, 15, true
+    s.width, s.maxRows, s.showOffline = 340, 5, true
     s.collapsedSections.friends = true
     s.pinned.someone, s.hidden.other, s.excluded.third = true, true, true
     s.anchor = { left = 10, top = 500, bottom = 400 }
-    s.sharing, s.shareZone = false, true
+    s.shareGuild, s.shareZone = false, false
 
     StaticPopupDialogs.DINGUS_RESET.OnAccept()
 
-    assert(s.width == 300 and s.fontSize == 12 and s.showOffline == false, "options back")
+    assert(s.width == 300 and s.maxRows == 20 and s.showOffline == false, "options back")
     assert(rawget(s, "width") == nil and rawget(s, "showOffline") == nil, "and no longer saved")
     assert(next(s.collapsedSections) == nil, "sections unfolded")
     assert(s.pinned.someone and s.hidden.other and s.excluded.third, "lists kept")
     assert(s.anchor, "position kept")
-    assert(s.sharing == false and s.shareZone == true, "privacy kept")
+    assert(s.shareGuild == false and s.shareZone == false, "privacy kept")
 
     ns.db.settings = ns.InitDB({}).settings
     ns.settings = ns.db.settings
@@ -1056,32 +1107,51 @@ test("changing an option doesn't save the position of a panel that never moved",
     ns.UI:ResetPosition()
     ns.UI:ApplySettings()
     assert(ns.settings.anchor == nil)
-    ns.UI:HoldPosition()
-    assert(ns.settings.anchor, "grow direction holds it when asked")
-    ns.UI:ResetPosition()
+end)
+
+test("dropdowns list their choices, pick one, and a reset arrow clears it", function()
+    local function Find(text)
+        for _, label in ipairs(fontStrings) do
+            if label.text == text and label.owner and label.owner.scripts.OnClick then return label.owner end
+        end
+    end
+    panel.scripts.OnShow(panel)
+    local button = Find("Always")
+    assert(button, "Show panel dropdown")
+    button.scripts.OnClick(button)
+    local item = Find("Never")
+    assert(item and item.shown, "choice listed")
+    item.scripts.OnClick(item)
+    assert(rawget(ns.settings, "showPanel") == "never", "picked and saved")
+    ns.settings.showPanel = nil
+    panel.scripts.OnShow(panel)
+    assert(rawget(ns.settings, "showPanel") == nil)
+    ns.UI:ApplySettings()
 end)
 
 test("by default only online friends below max level are listed and counted", function()
     local defaults = ns.InitDB({}).settings
-    for _, key in ipairs({ "showSelf", "showOffline", "showMaxLevel", "showGuild", "alertToast" }) do
+    for _, key in ipairs({ "showOffline", "showMaxLevel", "showGuild" }) do
         assert(defaults[key] == false, key .. " should be off")
     end
-    assert(defaults.opacity == 0, "no background")
-    assert(defaults.shown == true, "panel on")
+    assert(defaults.ownBar == "never", "own bar off")
+    assert(defaults.alertWith == "both" and defaults.alertWho == "friends", "alerts for friends")
+    assert(defaults.showPanel == "always", "panel on")
+    assert(defaults.shareZone == true, "zone shared")
     local main
     for _, frame in ipairs(frames) do
         if frame.frameName == "DingusFrame" then main = frame end
     end
     ShowEverything()
-    ns.settings.shown = false
+    ns.settings.showPanel = "never"
     ns.UI:ApplySettings()
-    assert(not main.shown, "unticking hides the panel")
-    ns.settings.shown = true
+    assert(not main.shown, "never hides the panel")
+    ns.settings.showPanel = "always"
     ns.UI:ApplySettings()
-    assert(main.shown, "ticking shows it again")
+    assert(main.shown, "always shows it again")
     assert(defaults.showParty == true and defaults.shareParty == true, "party on")
     local s = ns.settings
-    s.showSelf, s.showOffline, s.showMaxLevel, s.showGuild = false, false, false, false
+    s.ownBar, s.showOffline, s.showMaxLevel, s.showGuild = "never", false, false, false
     ns.UI:ApplySettings()
     local names = RowNames()
     assert(not names["You"], "own bar")
@@ -1182,7 +1252,7 @@ test("slash commands", function()
     Settings.OpenToCategory = function() opened = opened + 1 end
     slash("")
     assert(opened == 1, "/dingus opens settings")
-    assert(ns.settings.shown == true, "/dingus leaves the panel alone")
+    assert(ns.settings.showPanel == "always", "/dingus leaves the panel alone")
     slash("options")
     assert(opened == 2, "/dingus options still works")
     Settings.OpenToCategory = openToCategory

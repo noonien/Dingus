@@ -12,6 +12,18 @@ local FLAT = "Interface\\Buttons\\WHITE8X8"
 local DEFAULT_LEFT = 36
 local DEFAULT_OFFSET = 220
 local PADDING = 3
+local ROW_HEIGHT = 22
+local ROW_SPACING = 1
+local FONT_SIZE = 12
+local MIN_WIDTH = 180
+local MAX_WIDTH = 420
+local WIDTH_STEP = 4
+local MIN_ROWS = 1
+local MAX_ROWS = 40
+local EDGE_GRIP = 5
+local EDGE_LINE_ALPHA = 0.3
+local CORNER_GRIP = 16
+local CORNER_ART = "Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-"
 local CLICK_SLOP = 8 -- cursor travel, in screen pixels, that still counts as a click
 local SECTION_HEIGHT = 16
 local SECTION_GAP = 2
@@ -51,21 +63,6 @@ local COLOR = {
     guild = { 0.35, 0.9, 0.45 },
 }
 
--- Gold isn't offered: it would read as the finished-quest segment.
-ns.BAR_COLORS = {
-    { id = "class", label = "Class" },
-    { id = "sky", label = "Sky", rgb = { 127 / 255, 178 / 255, 229 / 255 } },
-    { id = "mint", label = "Mint", rgb = { 127 / 255, 224 / 255, 200 / 255 } },
-    { id = "violet", label = "Violet", rgb = { 170 / 255, 150 / 255, 240 / 255 } },
-    { id = "rose", label = "Rose", rgb = { 240 / 255, 150 / 255, 170 / 255 } },
-}
-
-ns.FONTS = {
-    { id = "default", label = "Standard", global = "STANDARD_TEXT_FONT" },
-    { id = "names", label = "Unit names", global = "UNIT_NAME_FONT" },
-    { id = "damage", label = "Damage", global = "DAMAGE_TEXT_FONT" },
-}
-
 local frame
 local sections = {}
 local rows = {}
@@ -73,16 +70,8 @@ local refreshPending = false
 local toast
 local toastQueue = {}
 
-local function FontPath()
-    local id = ns.settings.font
-    for _, font in ipairs(ns.FONTS) do
-        if font.id == id and _G[font.global] then return _G[font.global] end
-    end
-    return STANDARD_TEXT_FONT
-end
-
 local function StyleText(text, size, flags)
-    text:SetFont(FontPath(), size or ns.settings.fontSize, flags or "")
+    text:SetFont(STANDARD_TEXT_FONT, size or FONT_SIZE, flags or "")
     text:SetShadowColor(0, 0, 0, 0.9)
     text:SetShadowOffset(1, -1)
 end
@@ -122,12 +111,9 @@ local function ClassColor(class)
     return 0.8, 0.8, 0.8
 end
 
---- Bar colour for a row: grey when offline, otherwise the chosen colour.
+--- Bar colour for a row: grey when offline, otherwise the class colour.
 local function BarColor(entry)
     if not entry.online then return unpack(COLOR.offline) end
-    for _, option in ipairs(ns.BAR_COLORS) do
-        if option.id == ns.settings.barColor and option.rgb then return unpack(option.rgb) end
-    end
     return ClassColor(entry.peer.class)
 end
 
@@ -231,14 +217,9 @@ end
 -- Row actions
 --------------------------------------------------------------------------------
 
+--- Whispers the character, Battle.net friends included. An explicit chat frame
+--- avoids the temporary-window path that EllesmereUI found taints chat.
 local function OpenWhisper(peer)
-    local accountName = ns.Roster:AccountName(peer.account)
-    -- An explicit chat frame avoids the temporary-window path that EllesmereUI
-    -- found taints chat.
-    if accountName then
-        local sendBN = (ChatFrameUtil and ChatFrameUtil.SendBNetTell) or ChatFrame_SendBNetTell
-        if sendBN then sendBN(accountName, DEFAULT_CHAT_FRAME) return end
-    end
     local sendTell = (ChatFrameUtil and ChatFrameUtil.SendTell) or ChatFrame_SendTell
     if sendTell then sendTell(peer.name, DEFAULT_CHAT_FRAME) end
 end
@@ -327,8 +308,14 @@ local function AnimateRow(row, elapsed)
     end
 end
 
+--- The panel grows away from the nearer screen edge, so rows stay on screen.
 local function SavePosition()
-    ns.settings.anchor = { left = frame:GetLeft(), top = frame:GetTop(), bottom = frame:GetBottom() }
+    local top, bottom = frame:GetTop(), frame:GetBottom()
+    if (top + bottom) / 2 < UIParent:GetHeight() / 2 then
+        ns.settings.anchor = { left = frame:GetLeft(), bottom = bottom, up = true }
+    else
+        ns.settings.anchor = { left = frame:GetLeft(), top = top }
+    end
     UI:RestorePosition()
 end
 
@@ -463,13 +450,13 @@ local function UpdateRow(row, entry, y, width)
     row.entry = entry
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", frame, "TOPLEFT", PADDING, y)
-    row:SetSize(width, s.barHeight)
+    row:SetSize(width, ROW_HEIGHT)
     -- A square icon, then the bar: the row's height sets the icon's size.
-    row.icon:SetSize(s.barHeight, s.barHeight)
+    row.icon:SetSize(ROW_HEIGHT, ROW_HEIGHT)
     row.track:ClearAllPoints()
-    row.track:SetPoint("TOPLEFT", row, "TOPLEFT", s.barHeight + 1, 0)
+    row.track:SetPoint("TOPLEFT", row, "TOPLEFT", ROW_HEIGHT + 1, 0)
     row.track:SetPoint("BOTTOMRIGHT")
-    row.barWidth = width - s.barHeight - 1
+    row.barWidth = width - ROW_HEIGHT - 1
     PaintIcon(row, entry)
 
     local r, g, b = BarColor(entry)
@@ -580,14 +567,20 @@ end
 -- Rendering
 --------------------------------------------------------------------------------
 
+local function ListsOwnBar(list)
+    local mode = ns.settings.ownBar
+    if mode == "others" then return #list.party + #list.friends + #list.guild > 0 end
+    return mode == "always"
+end
+
 local function ShouldShow(list)
     local s = ns.settings
-    if not s.shown then return false end
-    if s.hideInCombat and InCombatLockdown() then return false end
-    if s.hideInInstance and IsInInstance() then return false end
+    local mode = s.showPanel
+    if mode == "never" then return false end
+    if (mode == "combat" or mode == "both") and InCombatLockdown() then return false end
+    if (mode == "instance" or mode == "both") and IsInInstance() then return false end
     -- Empty sections don't show, so with nothing listed there's nothing to draw.
-    if #list.party + #list.friends + #list.guild == 0 and (s.hideWhenAlone or not s.showSelf) then return false end
-    return true
+    return #list.party + #list.friends + #list.guild > 0 or ListsOwnBar(list)
 end
 
 local function Render()
@@ -597,7 +590,6 @@ local function Render()
 
     frame:SetShown(ShouldShow(list))
     frame:SetWidth(s.width)
-    frame.bg:SetVertexColor(COLOR.frame[1], COLOR.frame[2], COLOR.frame[3], s.opacity)
 
     local width = s.width - PADDING * 2
     local y = -PADDING
@@ -609,8 +601,8 @@ local function Render()
         used = used + 1
         rows[used] = rows[used] or NewRow()
         UpdateRow(rows[used], entry, y, width)
-        gap = s.spacing
-        y = y - s.barHeight - gap
+        gap = ROW_SPACING
+        y = y - ROW_HEIGHT - gap
     end
 
     local function AddSection(section, entries, online)
@@ -652,7 +644,7 @@ local function Render()
         end
     end
 
-    if s.showSelf then AddRow(list.self) end
+    if ListsOwnBar(list) then AddRow(list.self) end
     AddSection(sections.friends, list.friends, list.friendsOnline)
     -- Everyone in a party is online, so a count there says nothing.
     AddSection(sections.party, list.party)
@@ -663,6 +655,7 @@ local function Render()
         rows[i].entry = nil
     end
     frame:SetHeight(-y - gap + PADDING)
+    UI.listedRows = s.maxRows - budget
 end
 
 --- Redraws soon. A burst of messages costs one redraw.
@@ -675,15 +668,15 @@ function UI:Refresh()
     end)
 end
 
---- Folds or unfolds a section. The top edge holds even when growing upward, so
+--- Folds or unfolds a section. The top edge holds even when growing upwards, so
 --- the header under the mouse stays put; grow direction is for players coming and going.
 function UI:ToggleSection(id)
     local s = ns.settings
     local top = frame:GetTop()
     s.collapsedSections[id] = not s.collapsedSections[id] or nil
     Render()
-    if s.growUp and top then
-        s.anchor = { left = frame:GetLeft(), top = top, bottom = top - frame:GetHeight() }
+    if s.anchor and s.anchor.up and top then
+        s.anchor = { left = frame:GetLeft(), bottom = top - frame:GetHeight(), up = true }
         self:RestorePosition()
     end
 end
@@ -691,33 +684,19 @@ end
 --- Reapplies settings that affect the frame's anchor as well as its contents.
 function UI:ApplySettings()
     if not frame then return end
-    -- A panel that was never moved stays unsaved, so it follows the default position.
-    if ns.settings.anchor then self:HoldPosition() end
     self:RestorePosition()
     Render()
 end
 
---- Saves the panel's edges. The edge not holding the panel goes stale as its
---- height changes, so both are read. Switching grow direction after this leaves
---- the panel where it is.
-function UI:HoldPosition()
-    if frame and frame:GetTop() then
-        ns.settings.anchor = { left = frame:GetLeft(), top = frame:GetTop(), bottom = frame:GetBottom() }
-    end
-end
-
 function UI:RestorePosition()
-    local s = ns.settings
-    local anchor = s.anchor
+    local anchor = ns.settings.anchor
     frame:ClearAllPoints()
     if anchor then
-        if s.growUp then
+        if anchor.up then
             frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", anchor.left, anchor.bottom)
         else
             frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", anchor.left, anchor.top)
         end
-    elseif s.growUp then
-        frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", DEFAULT_LEFT, DEFAULT_OFFSET)
     else
         frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", DEFAULT_LEFT, -DEFAULT_OFFSET)
     end
@@ -792,12 +771,129 @@ end
 
 function UI:ShowLevelUp(peer)
     local s = ns.settings
+    if s.alertWith == "off" then return end
     if s.alertWho == "pinned" and not s.pinned[peer.key] then return end
     if s.alertWho == "friends" and not ns.Roster:IsFriend(peer) and not Tracker:IsDemo() then return end
-    if s.alertSound and SOUNDKIT and SOUNDKIT.TELL_MESSAGE then PlaySound(SOUNDKIT.TELL_MESSAGE) end
-    if not s.alertToast or not toast then return end
+    local sound = s.alertWith == "sound" or s.alertWith == "both"
+    if sound and SOUNDKIT and SOUNDKIT.TELL_MESSAGE then PlaySound(SOUNDKIT.TELL_MESSAGE) end
+    local showToast = s.alertWith == "toast" or s.alertWith == "both"
+    if not showToast or not toast then return end
     table.insert(toastQueue, { name = peer.name, class = peer.class, level = peer.level })
     if not toast:IsShown() then ShowNextToast() end
+end
+
+--------------------------------------------------------------------------------
+-- Resizing
+--------------------------------------------------------------------------------
+
+local grips = {}
+local resizing
+
+local function Clamp(value, minimum, maximum)
+    return math.max(minimum, math.min(maximum, value))
+end
+
+--- Follows the cursor. Only a real change is saved, so a press that goes nowhere
+--- leaves the setting following its default.
+local function UpdateResize()
+    local s = ns.settings
+    local x, y = GetCursorPosition()
+    local scale = frame:GetEffectiveScale()
+    local changed = false
+    if resizing.width then
+        local width = resizing.width + (x - resizing.x) / scale
+        width = Clamp(math.floor(width / WIDTH_STEP + 0.5) * WIDTH_STEP, MIN_WIDTH, MAX_WIDTH)
+        if width ~= s.width then
+            s.width = width
+            changed = true
+        end
+    end
+    if resizing.rows then
+        local rows = resizing.rows + math.floor((resizing.y - y) / scale / (ROW_HEIGHT + ROW_SPACING) + 0.5)
+        rows = Clamp(rows, MIN_ROWS, MAX_ROWS)
+        -- The start is what's listed, not the limit, so not moving yet changes nothing.
+        resizing.rowsMoved = resizing.rowsMoved or rows ~= resizing.rows
+        if resizing.rowsMoved and rows ~= s.maxRows then
+            s.maxRows = rows
+            changed = true
+        end
+    end
+    if changed then Render() end
+end
+
+local function BeginResize(grip)
+    local x, y = GetCursorPosition()
+    resizing = { x = x, y = y }
+    if grip.resizesWidth then resizing.width = ns.settings.width end
+    -- From what's on screen: the limit can be far above how many are listed.
+    if grip.resizesRows then resizing.rows = math.min(ns.settings.maxRows, UI.listedRows or MAX_ROWS) end
+    GameTooltip:Hide()
+    grip:SetScript("OnUpdate", UpdateResize)
+end
+
+local function EndResize(grip)
+    if not resizing then return end
+    resizing = nil
+    grip:SetScript("OnUpdate", nil)
+end
+
+local function NewGrip(resizesWidth, resizesRows)
+    local grip = CreateFrame("Button", nil, frame)
+    grip.resizesWidth, grip.resizesRows = resizesWidth, resizesRows
+    grip:SetFrameLevel(frame:GetFrameLevel() + 10)
+    grip:SetScript("OnMouseDown", BeginResize)
+    grip:SetScript("OnMouseUp", EndResize)
+    grip:Hide()
+    table.insert(grips, grip)
+    return grip
+end
+
+local function BuildGrips()
+    local right = NewGrip(true, false)
+    right:SetWidth(EDGE_GRIP)
+    right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", EDGE_GRIP - PADDING, 0)
+    right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", EDGE_GRIP - PADDING, 0)
+
+    local bottom = NewGrip(false, true)
+    bottom:SetHeight(EDGE_GRIP)
+    bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, PADDING - EDGE_GRIP)
+    bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, PADDING - EDGE_GRIP)
+
+    -- An edge shows only with the cursor on it, as one thin line.
+    local rightLine = NewFlat(right, "HIGHLIGHT")
+    rightLine:SetVertexColor(1, 1, 1, EDGE_LINE_ALPHA)
+    rightLine:SetWidth(1)
+    rightLine:SetPoint("TOP", right, "TOP")
+    rightLine:SetPoint("BOTTOM", right, "BOTTOM")
+    local bottomLine = NewFlat(bottom, "HIGHLIGHT")
+    bottomLine:SetVertexColor(1, 1, 1, EDGE_LINE_ALPHA)
+    bottomLine:SetHeight(1)
+    bottomLine:SetPoint("LEFT", bottom, "LEFT")
+    bottomLine:SetPoint("RIGHT", bottom, "RIGHT")
+
+    -- The game's own grip, just outside the corner, so it covers no bar text.
+    local corner = NewGrip(true, true)
+    corner:SetSize(CORNER_GRIP, CORNER_GRIP)
+    corner:SetPoint("TOPLEFT", frame, "BOTTOMRIGHT", -PADDING, PADDING)
+    corner:SetNormalTexture(CORNER_ART .. "Up")
+    corner:SetHighlightTexture(CORNER_ART .. "Highlight")
+    corner:SetPushedTexture(CORNER_ART .. "Down")
+    corner:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Drag to resize. Double-click to reset the size.", 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    corner:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    corner:SetScript("OnDoubleClick", function()
+        ns.settings.width, ns.settings.maxRows = nil, nil
+        Render()
+    end)
+end
+
+--- The grips only exist for the mouse, and only while it's over an unlocked panel.
+local function UpdateGrips(over)
+    local shown = resizing ~= nil or (over and not ns.settings.locked)
+    for _, grip in ipairs(grips) do grip:SetShown(shown) end
 end
 
 --------------------------------------------------------------------------------
@@ -810,9 +906,6 @@ local function BuildFrame()
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
 
-    frame.bg = NewFlat(frame, "BACKGROUND", -8)
-    frame.bg:SetAllPoints()
-
     sections.party = NewSection("party", "PARTY")
     sections.friends = NewSection("friends", "FRIENDS")
     sections.guild = NewSection("guild", "GUILD")
@@ -823,10 +916,14 @@ local function BuildFrame()
         fadeClock = fadeClock + elapsed
         if fadeClock < 0.15 then return end
         fadeClock = 0
+        -- Reaches past the corner, where the grip sits outside the panel.
+        local over = self:IsMouseOver(0, -CORNER_GRIP, 0, CORNER_GRIP)
+        UpdateGrips(over)
         local alpha = 1
-        if ns.settings.fadeUntilHover and not MouseIsOver(self) then alpha = FADED_ALPHA end
+        if ns.settings.fadeUntilHover and not over then alpha = FADED_ALPHA end
         if self:GetAlpha() ~= alpha then self:SetAlpha(alpha) end
     end)
+    BuildGrips()
 end
 
 function UI:Start()

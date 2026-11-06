@@ -3,48 +3,32 @@ local addonName, ns = ...
 ns.addonName = addonName
 
 ns.DEFAULTS = {
-    -- Layout
-    shown = true,
+    -- Panel
     locked = false,
     width = 300,
-    barHeight = 22,
-    spacing = 1,
-    growUp = false,
     maxRows = 20,
-    anchor = nil, -- { left, top, bottom }, the panel's edges
-
-    -- Look
-    barColor = "class",
-    font = "default",
-    fontSize = 12,
-    opacity = 0,
+    anchor = nil, -- { left, top } or, growing upwards, { left, bottom, up = true }
     barText = "full",
+    showPanel = "always", -- always, combat, instance, both (hidden in those), never
+    fadeUntilHover = false,
 
     -- Rows
     sortBy = "level",
-    showSelf = false,
+    ownBar = "never", -- never, others (when anyone else is listed), always
     showOffline = false,
     showMaxLevel = false,
     showGuild = false,
     showParty = true,
 
-    -- Visibility
-    hideInCombat = false,
-    hideInInstance = false,
-    hideWhenAlone = false,
-    fadeUntilHover = false,
-
     -- Alerts
-    alertToast = false,
-    alertSound = false,
-    alertWho = "all",
+    alertWith = "both", -- off, toast, sound, both
+    alertWho = "friends",
 
     -- Privacy
-    sharing = true,
     shareFriends = true,
     shareGuild = true,
     shareParty = true,
-    shareZone = false,
+    shareZone = true,
 }
 
 -- Edited in place, so each player needs their own table rather than a default.
@@ -55,7 +39,6 @@ local KEPT_ON_RESET = {
     pinned = true,
     hidden = true,
     excluded = true,
-    sharing = true,
     shareFriends = true,
     shareGuild = true,
     shareParty = true,
