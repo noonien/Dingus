@@ -3,8 +3,9 @@
 ## Notes: See the XP of friends, party members and guildmates who also run Dingus.
 ## Author: noonien
 ## IconTexture: Interface\AddOns\Dingus\Icon
-## Version: 0.1.1
+## Version: 0.1.2
 ## SavedVariables: DingusAddonDB
+## X-Curse-Project-ID: 1787632
 
 Core.lua
 Comm.lua
