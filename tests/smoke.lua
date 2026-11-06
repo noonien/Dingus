@@ -345,6 +345,12 @@ test("a Battle.net status adds a row and a working tooltip", function()
     assert(row, "row")
     assert(row.percent:GetText() == "50.0k/100.0k (50%)", "text: " .. tostring(row.percent:GetText()))
     assert(row.name:GetText() == "Mira Vale" and row.level:GetText() == 41, "name and level")
+    assert(row.level:GetWidth() == nil, "a set width would cut the level off")
+    local nameLeft
+    for _, point in ipairs(row.name.points) do
+        if point[1] == "LEFT" then nameLeft = point[4] end
+    end
+    assert(nameLeft == 3 + row.level:GetStringWidth() + 2 + 4, "the name starts after the measured column")
     row.scripts.OnEnter(row)
     local text = table.concat(tooltip, "\n")
     assert(text:find("Level 41 Mage", 1, true), text)

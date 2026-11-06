@@ -20,6 +20,10 @@ local DETAILS_HEIGHT = 16
 local FONT_SIZE = 12
 local COMPACT_FONT_SIZE = 10
 local DETAILS_FONT_SIZE = 11
+local LEVEL_LEFT = 3
+local LEVEL_SAMPLE = "88" -- the level column is as wide as this text, plus the slack
+local LEVEL_SLACK = 2
+local NAME_GAP = 4
 local HEADER_HEIGHT = 16
 local MIN_WIDTH = 180
 local MAX_WIDTH = 420
@@ -390,9 +394,7 @@ local function NewRow()
     row.extra:SetPoint("RIGHT", row.percent, "LEFT", -6, 0)
     row.extra:SetTextColor(unpack(COLOR.muted))
     row.level = NewText(row, "CENTER")
-    row.level:SetPoint("LEFT", row.track, "LEFT", 3, 0)
     row.name = NewText(row, "LEFT")
-    row.name:SetPoint("LEFT", row.level, "RIGHT", 4, 0)
     row.name:SetPoint("RIGHT", row.extra, "LEFT", -6, 0)
 
     row.detailRate = NewText(row, "RIGHT")
@@ -416,7 +418,16 @@ local function BarText(row, peer)
     local mode = ns.settings.barText
     local showLevel = mode == "full" or mode == "level"
     local compact = ns.settings.rowHeight == "compact"
-    row.level:SetWidth(showLevel and (compact and 14 or 18) or 1)
+    -- The column is measured from the font in use and is the same for any level, so
+    -- names line up. The level text is only centred in it and has no width of its own:
+    -- a set width would cut a level that doesn't fit to "...".
+    local column = 1
+    if showLevel then
+        row.level:SetText(LEVEL_SAMPLE)
+        column = math.ceil(row.level:GetStringWidth()) + LEVEL_SLACK
+    end
+    row.level:SetPoint("CENTER", row.track, "LEFT", LEVEL_LEFT + column / 2, 0)
+    row.name:SetPoint("LEFT", row.track, "LEFT", LEVEL_LEFT + column + NAME_GAP, 0)
     row.level:SetText(showLevel and peer.level or "")
 
     local percent = ""
