@@ -222,11 +222,16 @@ function Roster:IsCharFriend(name)
     return FindCharFriend(name) ~= nil
 end
 
+function Roster:IsFriend(peer)
+    return (peer.account and accounts[peer.account] ~= nil) or FindCharFriend(peer.name) ~= nil
+end
+
 --- "party", "friends", "guild", or nil once this person is none of those.
---- Someone in the party is listed there rather than twice.
+--- Each person is listed once, in the first of those that applies. With party
+--- members not shown, someone in the party falls through to the others.
 function Roster:GroupOf(peer)
-    if FindPartyMember(peer.name) then return "party" end
-    if (peer.account and accounts[peer.account]) or FindCharFriend(peer.name) then return "friends" end
+    if ns.settings.showParty and FindPartyMember(peer.name) then return "party" end
+    if self:IsFriend(peer) then return "friends" end
     if guildName and peer.guild == guildName then return "guild" end
     return nil
 end

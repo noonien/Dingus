@@ -389,7 +389,7 @@ function Tracker:BuildList()
     local shownGuild, guildOnline = Filter(groups.guild)
     return {
         self = { peer = me, online = true, runtime = Runtime(SELF_KEY), isSelf = true },
-        party = s.showParty and shownParty or {},
+        party = shownParty,
         friends = shownFriends,
         guild = s.showGuild and shownGuild or {},
         friendsOnline = friendsOnline,

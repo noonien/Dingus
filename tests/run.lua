@@ -259,30 +259,17 @@ test("completed quest xp reaches the peer", function()
     eq(ns.db.peers["mira vale"].questXP, 40)
 end)
 
-test("old saved settings move to the new defaults once", function()
-    local db = ns.InitDB({ settings = { opacity = 0.46, collapsed = true } })
-    eq(db.settings.opacity, 0, "background removed")
-    eq(db.settings.collapsed, nil, "header state gone")
-    eq(db.schema, 7)
-    db.settings.opacity = 0.3
-    eq(ns.InitDB(db).settings.opacity, 0.3, "a value set afterwards stays")
-    eq(ns.InitDB({ schema = 4, settings = { showGuild = true } }).settings.showGuild, false, "guild reset once")
-    eq(ns.InitDB({ schema = 5, settings = { showGuild = true } }).settings.showGuild, true, "turned on afterwards stays")
-    eq(ns.InitDB({ schema = 5, settings = { shown = false } }).settings.shown, true, "panel shown again once")
-    eq(ns.InitDB({ schema = 6, settings = { shown = false } }).settings.shown, false, "hidden afterwards stays")
-    eq(ns.InitDB({}).settings.shown, true, "new install")
-    eq(ns.InitDB({ schema = 6, settings = { showSelf = false } }).settings.showSelf, true, "own bar on once")
-    eq(ns.InitDB({ schema = 7, settings = { showSelf = false } }).settings.showSelf, false, "turned off afterwards stays")
-    eq(ns.InitDB({}).settings.showSelf, true, "new install")
-    eq(ns.InitDB({}).settings.showGuild, false, "new install")
-    eq(ns.InitDB({}).settings.opacity, 0, "new install")
-end)
-
-test("old row sizes move to the thick-bar defaults, chosen ones stay", function()
-    local old = ns.InitDB({ schema = 2, settings = { width = 268, barHeight = 24, spacing = 4, fontSize = 13 } }).settings
-    eq(old.width, 300) eq(old.barHeight, 22) eq(old.spacing, 1) eq(old.fontSize, 12)
-    local chosen = ns.InitDB({ schema = 2, settings = { width = 350, barHeight = 30, spacing = 3, fontSize = 15 } }).settings
-    eq(chosen.width, 350) eq(chosen.barHeight, 30) eq(chosen.spacing, 3) eq(chosen.fontSize, 15)
+test("a new install gets the defaults, and saved settings stay", function()
+    local defaults = ns.InitDB({}).settings
+    eq(defaults.shown, true)
+    eq(defaults.showSelf, false)
+    eq(defaults.showGuild, false)
+    eq(defaults.opacity, 0)
+    local saved = ns.InitDB({ settings = { showSelf = true, opacity = 0.3, width = 350 } }).settings
+    eq(saved.showSelf, true)
+    eq(saved.opacity, 0.3)
+    eq(saved.width, 350)
+    eq(saved.barHeight, 22, "a missing setting gets its default")
 end)
 
 print(("%d passed, %d failed"):format(passed, failed))

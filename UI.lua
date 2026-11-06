@@ -253,17 +253,20 @@ local function IsExcluded(peer)
     return ns.settings.excluded[peer.key] ~= nil
 end
 
-local function OpenMenu(row)
+--- Left click gets whisper and invite. Right click adds what changes the panel.
+local function OpenMenu(row, full)
     local entry = row.entry
     if not entry or entry.isSelf or not (MenuUtil and MenuUtil.CreateContextMenu) then return end
     local peer = entry.peer
     local s = ns.settings
     MenuUtil.CreateContextMenu(row, function(_, root)
         root:CreateTitle(peer.name)
-        root:CreateButton("Whisper", function() OpenWhisper(peer) end)
+        local online = entry.online and true or false
+        root:CreateButton("Whisper", function() OpenWhisper(peer) end):SetEnabled(online)
         root:CreateButton("Invite", function()
             if C_PartyInfo and C_PartyInfo.InviteUnit then C_PartyInfo.InviteUnit(peer.name) end
-        end)
+        end):SetEnabled(online)
+        if not full then return end
         root:CreateButton(s.pinned[peer.key] and "Unpin" or "Pin to top", function()
             s.pinned[peer.key] = not s.pinned[peer.key] or nil
             UI:Refresh()
@@ -370,13 +373,7 @@ end
 local function NewRow()
     local row = CreateFrame("Button", nil, frame)
     EnableClickAndDrag(row, function(self, button)
-        local entry = self.entry
-        if not entry or entry.isSelf then return end
-        if button == "RightButton" then
-            OpenMenu(self)
-        else
-            OpenWhisper(entry.peer)
-        end
+        OpenMenu(self, button == "RightButton")
     end)
 
     row.icon = row:CreateTexture(nil, "ARTWORK")
@@ -792,7 +789,7 @@ end
 function UI:ShowLevelUp(peer)
     local s = ns.settings
     if s.alertWho == "pinned" and not s.pinned[peer.key] then return end
-    if s.alertWho == "friends" and ns.Roster:GroupOf(peer) ~= "friends" and not Tracker:IsDemo() then return end
+    if s.alertWho == "friends" and not ns.Roster:IsFriend(peer) and not Tracker:IsDemo() then return end
     if s.alertSound and SOUNDKIT and SOUNDKIT.TELL_MESSAGE then PlaySound(SOUNDKIT.TELL_MESSAGE) end
     if not s.alertToast or not toast then return end
     table.insert(toastQueue, { name = peer.name, class = peer.class, level = peer.level })

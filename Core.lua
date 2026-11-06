@@ -23,7 +23,7 @@ ns.DEFAULTS = {
 
     -- Rows
     sortBy = "level",
-    showSelf = true,
+    showSelf = false,
     showOffline = false,
     showMaxLevel = false,
     showGuild = false,
@@ -63,40 +63,6 @@ end
 function ns.InitDB(db)
     db.settings = db.settings or {}
     db.peers = db.peers or {}
-    if (db.schema or 1) < 2 then
-        -- The panel header is gone.
-        db.settings.collapsed = nil
-        db.schema = 2
-    end
-    if db.schema < 3 then
-        -- Thick bars with their text inside: move sizes left at their old defaults.
-        local s = db.settings
-        if s.width == 268 then s.width = nil end
-        if s.barHeight == 24 then s.barHeight = nil end
-        if s.spacing == 2 or s.spacing == 4 then s.spacing = nil end
-        if s.fontSize == 13 then s.fontSize = nil end
-        db.schema = 3
-    end
-    if db.schema < 4 then
-        -- The panel no longer has a background; the slider can bring one back.
-        db.settings.opacity = nil
-        db.schema = 4
-    end
-    if db.schema < 5 then
-        -- Guildmates were on by default in the first versions, so a saved "on" isn't a choice.
-        db.settings.showGuild = nil
-        db.schema = 5
-    end
-    if db.schema < 6 then
-        -- /dingus used to hide the panel without saying so. It's a checkbox now, so start visible.
-        db.settings.shown = nil
-        db.schema = 6
-    end
-    if db.schema < 7 then
-        -- The own bar was off by default, which left the panel empty with nobody else listed.
-        db.settings.showSelf = nil
-        db.schema = 7
-    end
     for key, value in pairs(ns.DEFAULTS) do
         if db.settings[key] == nil then db.settings[key] = CopyDefault(value) end
     end
@@ -117,7 +83,7 @@ function ns.Plain(value)
 end
 
 function ns.Print(text)
-    print("|cff7fb2e5Ding:|r " .. text)
+    print("|cff7fb2e5Dingus:|r " .. text)
 end
 
 local listeners = {}

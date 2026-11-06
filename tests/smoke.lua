@@ -554,36 +554,67 @@ test("the saved record survives into a new session's shape", function()
     assert(DingusAddonDB.peers["mira vale"].account == "Mira#1")
 end)
 
-test("left-click whispers by Battle.net account", function()
-    local row = RowNames()["Mira Vale"]
-    Press(row, "LeftButton")
-    assert(whispered == "Mira", "whispered: " .. tostring(whispered))
-    local own = RowNames()["You"]
+--- Stands in for the game's menu. Returns the labels and actions of the last one opened.
+local function FakeMenu()
+    local opened = { count = 0, labels = {}, actions = {}, enabled = {} }
+    local root = {
+        CreateTitle = noop,
+        CreateButton = function(_, label, fn)
+            opened.labels[#opened.labels + 1] = label
+            opened.actions[label] = fn
+            return { SetEnabled = function(_, enabled) opened.enabled[label] = enabled end }
+        end,
+    }
+    MenuUtil = {
+        CreateContextMenu = function(_, build)
+            opened.count = opened.count + 1
+            opened.labels, opened.actions, opened.enabled = {}, {}, {}
+            build(nil, root)
+        end,
+    }
+    return opened
+end
+
+test("left-click offers whisper and invite, and whispers by Battle.net account", function()
+    local opened = FakeMenu()
+    C_PartyInfo = { InviteUnit = function(name) opened.invited = name end }
     whispered = nil
-    Press(own, "LeftButton")
-    assert(whispered == nil, "own row does nothing")
+    Press(RowNames()["Mira Vale"], "LeftButton")
+    assert(whispered == nil, "the click alone doesn't whisper")
+    assert(table.concat(opened.labels, ",") == "Whisper,Invite", "labels: " .. table.concat(opened.labels, ","))
+    opened.actions["Whisper"]()
+    assert(whispered == "Mira", "whispered: " .. tostring(whispered))
+    opened.actions["Invite"]()
+    assert(opened.invited == "Mira Vale")
+    assert(opened.enabled["Whisper"] == true and opened.enabled["Invite"] == true, "online")
+    local count = opened.count
+    Press(RowNames()["You"], "LeftButton")
+    Press(RowNames()["You"], "RightButton")
+    assert(opened.count == count, "own row has no menu")
+
+    local row = RowNames()["Mira Vale"]
+    row.entry.online = false
+    Press(row, "LeftButton")
+    assert(opened.enabled["Whisper"] == false and opened.enabled["Invite"] == false, "offline: greyed out")
+    row.entry.online = true
+    MenuUtil, C_PartyInfo = nil, nil
 end)
 
 test("the right-click menu builds and its actions work", function()
-    local actions = {}
-    local root = {
-        CreateTitle = noop,
-        CreateButton = function(_, label, fn) actions[label] = fn end,
-    }
-    MenuUtil = { CreateContextMenu = function(_, build) build(nil, root) end }
-    C_PartyInfo = { InviteUnit = function(name) actions.invited = name end }
+    local opened = FakeMenu()
+    C_PartyInfo = { InviteUnit = function(name) opened.invited = name end }
     local row = RowNames()["Mira Vale"]
     Press(row, "RightButton")
-    actions["Invite"]()
-    assert(actions.invited == "Mira Vale")
-    actions["Pin to top"]()
+    opened.actions["Invite"]()
+    assert(opened.invited == "Mira Vale")
+    opened.actions["Pin to top"]()
     assert(ns.settings.pinned["mira vale"])
-    actions["Stop sharing my XP with them"]()
+    opened.actions["Stop sharing my XP with them"]()
     assert(ns.settings.excluded["mira vale"] and ns.settings.excluded["account:Mira#1"])
     Press(row, "RightButton")
-    actions["Share my XP with them"]()
+    opened.actions["Share my XP with them"]()
     assert(not next(ns.settings.excluded), "cleared")
-    actions["Hide"]()
+    opened.actions["Hide"]()
     Advance(1)
     assert(not RowNames()["Mira Vale"], "hidden")
     ns.settings.hidden = {}
@@ -786,6 +817,55 @@ test("party members with the addon get their own section, and nobody else does",
     assert(ns.Roster:GroupOf(DingusAddonDB.peers["joss harrow"]) == "guild", "guildmate back")
 end)
 
+test("each person is listed once: party, then friends, then guild", function()
+    local peers, s = DingusAddonDB.peers, ns.settings
+    local mira, joss, rhea = peers["mira vale"], peers["joss harrow"], peers["rhea stone"]
+    local function Groups()
+        return ns.Roster:GroupOf(mira), ns.Roster:GroupOf(joss), ns.Roster:GroupOf(rhea)
+    end
+
+    -- A friend who is also a guildmate stays out of the guild.
+    local miraGuild = mira.guild
+    mira.guild = "Test Guild"
+    local friend, guildmate = Groups()
+    assert(friend == "friends" and guildmate == "guild", "not grouped")
+
+    group.home = true
+    group.members.party1 = { first = "Mira", last = "Vale" }
+    group.members.party2 = { first = "Joss", last = "Harrow" }
+    group.members.party3 = { first = "Rhea", last = "Stone" }
+    Fire("GROUP_ROSTER_UPDATE")
+    Advance(3)
+    local a, b, c = Groups()
+    assert(a == "party" and b == "party" and c == "party", "party comes first")
+
+    s.showParty = false
+    a, b, c = Groups()
+    assert(a == "friends", "friend falls back to friends: " .. tostring(a))
+    assert(b == "guild", "guildmate falls back to guild: " .. tostring(b))
+    assert(c == nil, "stranger isn't listed")
+    assert(#ns.Tracker:BuildList().party == 0, "no party section")
+    s.showParty = true
+
+    -- "Friends only" alerts still count a friend listed under Party.
+    local sound, kit = PlaySound, SOUNDKIT
+    local toastOn, soundOn, who = s.alertToast, s.alertSound, s.alertWho
+    local plays = 0
+    PlaySound, SOUNDKIT = function() plays = plays + 1 end, { TELL_MESSAGE = 1 }
+    s.alertToast, s.alertSound, s.alertWho = false, true, "friends"
+    ns.UI:ShowLevelUp(mira)
+    assert(plays == 1, "friend in the party alerts")
+    ns.UI:ShowLevelUp(rhea)
+    assert(plays == 1, "stranger in the party doesn't")
+    PlaySound, SOUNDKIT = sound, kit
+    s.alertToast, s.alertSound, s.alertWho = toastOn, soundOn, who
+
+    mira.guild = miraGuild
+    group.home, group.members = false, {}
+    Fire("GROUP_ROSTER_UPDATE")
+    Advance(3)
+end)
+
 test("sections with nobody in them don't show, and rows can drag the panel", function()
     local main, buttons = nil, {}
     for _, frame in ipairs(frames) do
@@ -817,11 +897,12 @@ test("sections with nobody in them don't show, and rows can drag the panel", fun
     assert(main.shown and friends.shown and guild.shown, "all back")
 
     local row = RowNames()["Mira Vale"]
-    whispered = nil
+    local opened = FakeMenu()
     Drag(row, 50)
-    assert(whispered == nil, "a drag doesn't whisper")
+    assert(opened.count == 0, "a drag doesn't open the menu")
     Press(row, "LeftButton")
-    assert(whispered == "Mira", "the next click does")
+    assert(opened.count == 1, "the next click does")
+    MenuUtil = nil
     Drag(RowNames()["You"], 50)
     assert(ns.settings.anchor, "the own bar drags too")
     ns.UI:ResetPosition()
@@ -930,11 +1011,11 @@ end)
 
 test("by default only online friends below max level are listed and counted", function()
     local defaults = ns.InitDB({}).settings
-    for _, key in ipairs({ "showOffline", "showMaxLevel", "showGuild", "alertToast" }) do
+    for _, key in ipairs({ "showSelf", "showOffline", "showMaxLevel", "showGuild", "alertToast" }) do
         assert(defaults[key] == false, key .. " should be off")
     end
     assert(defaults.opacity == 0, "no background")
-    assert(defaults.shown == true and defaults.showSelf == true, "panel and own bar on")
+    assert(defaults.shown == true, "panel on")
     local main
     for _, frame in ipairs(frames) do
         if frame.frameName == "DingusFrame" then main = frame end
