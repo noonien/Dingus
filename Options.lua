@@ -480,9 +480,7 @@ end
 
 local function PrintHelp()
     ns.Print("/dingus: open settings (or right-click a section header)")
-    ns.Print("/dingus demo: fill the panel with sample players")
     ns.Print("/dingus reset: move the panel back to its starting position")
-    ns.Print("/dingus diag: test which message routes reach other players")
 end
 
 local function HandleSlash(input)

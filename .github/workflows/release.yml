@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    # Tag runs can only restore caches saved on the default branch, so main has
+    # to run too. It also tries the packaging, without publishing anything.
+    branches:
+      - main
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the changelog needs the history and the previous tag
+
+      - uses: nixbuild/nix-quick-install-action@v35
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+
+      - name: Run tests
+        run: nix run .#test
+
+      - name: Package, and publish if this is a tag
+        run: nix run .#package -- ${{ github.ref_type != 'tag' && '-d' || '' }}
+        env:
+          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

@@ -1,0 +1,7 @@
+package-as: Dingus
+
+ignore:
+  - README.md
+  - flake.lock
+  - flake.nix
+  - tests
