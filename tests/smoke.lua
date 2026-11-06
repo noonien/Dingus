@@ -17,7 +17,7 @@ local function NewWidget(kind)
     local widget = { kind = kind, scripts = {}, shown = true, points = {} }
     local methods = {
         SetPoint = function(self, ...) table.insert(self.points, { ... }) end,
-        SetGradient = function(self, _, bottom, top) self.gradientBottom, self.gradientTop = bottom, top end,
+        SetVertexColor = function(self, r, g, b, a) self.color = { r = r, g = g, b = b, a = a } end,
         ClearAllPoints = function(self) self.points = {} end,
         SetScript = function(self, name, fn) self.scripts[name] = fn end,
         GetScript = function(self, name) return self.scripts[name] end,
@@ -419,11 +419,9 @@ test("the bar shows current xp, then finished quests, then rested", function()
     assert(near(row.quest.points[1][4], whole * 0.5) and near(row.quest.width, whole * 0.2), "quest")
     assert(near(row.rest.points[1][4], whole * 0.7) and near(row.rest.width, whole * 0.1), "rested")
     assert(row.fill.shown and row.quest.shown and row.rest.shown)
-    assert(row.fill.gradientTop.a == 1, "current xp is solid")
-    local questTop, restTop = row.quest.gradientTop, row.rest.gradientTop
-    assert(questTop.a > 0.5 and questTop.a < 1 and restTop.a == questTop.a, "quest and rested visible but see-through")
-    assert(questTop.r > 0.4 and restTop.b > 0.4, "brighter than the fill, or they vanish")
-    assert(row.fill.gradientTop.b <= 0.3, "colours are muted")
+    assert(row.fill.color.a == 0.6, "the fill is see-through")
+    assert(row.quest.color.a == 0.4 and row.rest.color.a == 0.4, "quest and rested are fainter")
+    assert(near(row.fill.color.b, 0.9 * 0.62) and near(row.fill.color.r, 0.2 * 0.62), "a deep tone of the class colour")
 
     row.scripts.OnEnter(row)
     local text = table.concat(tooltip, "\n")
@@ -1035,6 +1033,90 @@ test("the panel resizes from its grips, and only a real change is saved", functi
     assert(not corner.shown, "leaving hides them")
     cursorOver = true
     ns.UI:ApplySettings()
+end)
+
+test("compact rows and the details line", function()
+    local s = ns.settings
+    local row = RowNames()["Mira Vale"]
+    assert(row.track.height == 22 and row.height == 22, "normal")
+    assert(not row.detailZone.shown and not row.detailRate.shown, "no details by default")
+    assert(row.percent:GetText():find("/", 1, true), "full xp text")
+
+    s.rowHeight = "compact"
+    ns.UI:ApplySettings()
+    row = RowNames()["Mira Vale"]
+    assert(row.track.height == 15 and row.height == 15, "compact")
+    assert(row.percent:GetText():find("^%d+%%$"), "compact shows the percent: " .. row.percent:GetText())
+
+    s.rowHeight = nil
+    s.showDetails = true
+    ns.UI:ApplySettings()
+    row = RowNames()["Mira Vale"]
+    assert(row.track.height == 22 and row.height == 38, "the line goes under the bar")
+    assert(row.detailZone.shown and row.detailRate.shown, "details shown")
+    assert(row.detailZone:GetText(), "a zone or a note")
+    assert(row.detailRate:GetText():find("/h, ", 1, true) or row.detailRate:GetText() == "No recent XP",
+        tostring(row.detailRate:GetText()))
+
+    s.rowHeight = "compact"
+    ns.UI:ApplySettings()
+    row = RowNames()["Mira Vale"]
+    assert(row.height == 31, "they combine")
+    s.rowHeight, s.showDetails = nil, nil
+    ns.UI:ApplySettings()
+end)
+
+test("the header shows on hover, and a hidden panel always keeps it", function()
+    local main, header
+    for _, frame in ipairs(frames) do
+        if frame.frameName == "DingusFrame" then main = frame end
+        if frame.toggle then header = frame end
+    end
+    local s = ns.settings
+    ns.UI:ApplySettings()
+    cursorOver = false
+    main.scripts.OnUpdate(main, 1)
+    assert(not header.shown, "out of sight without the mouse")
+    assert(header.toggle.label:GetText() == "Hide")
+    cursorOver = true
+    main.scripts.OnUpdate(main, 1)
+    assert(header.shown, "hover shows it")
+
+    local listed = #Rows()
+    assert(listed > 0)
+    s.anchor = { left = 36, bottom = 400, up = true }
+    ns.UI:ApplySettings()
+    header.toggle.scripts.OnClick(header.toggle)
+    assert(s.collapsed == true and #Rows() == 0, "bars hidden")
+    assert(main.shown, "the panel stays for its header")
+    assert(main.points[1][5] == 700 - main.height, "the top edge holds")
+    assert(header.toggle.label:GetText() == "Show")
+
+    cursorOver = false
+    main.scripts.OnUpdate(main, 1)
+    assert(header.shown, "always visible while hidden")
+    cursorOver = true
+    main.scripts.OnUpdate(main, 1)
+    for _, frame in ipairs(frames) do
+        if frame.resizesWidth then assert(not frame.shown, "nothing to resize while hidden") end
+    end
+
+    s.showPanel = "never"
+    ns.UI:ApplySettings()
+    assert(not main.shown, "the Show panel setting still wins")
+    s.showPanel = nil
+
+    header.toggle.scripts.OnClick(header.toggle)
+    assert(rawget(s, "collapsed") == nil and #Rows() == listed, "back, and no longer saved")
+
+    local opened = 0
+    local openToCategory = Settings.OpenToCategory
+    Settings.OpenToCategory = function() opened = opened + 1 end
+    header.options.scripts.OnClick(header.options)
+    assert(opened == 1, "opens settings")
+    Settings.OpenToCategory = openToCategory
+    s.anchor = nil
+    ns.UI:ResetPosition()
 end)
 
 test("the row limit shows how many are left out", function()

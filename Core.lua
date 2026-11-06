@@ -9,6 +9,9 @@ ns.DEFAULTS = {
     maxRows = 20,
     anchor = nil, -- { left, top } or, growing upwards, { left, bottom, up = true }
     barText = "full",
+    rowHeight = "normal", -- normal, compact
+    showDetails = false,
+    collapsed = false, -- hidden down to the header, from the header's own button
     showPanel = "always", -- always, combat, instance, both (hidden in those), never
     fadeUntilHover = false,
 

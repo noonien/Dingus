@@ -389,6 +389,11 @@ local function BuildPanel()
         { id = "level", label = "Level only" },
         { id = "none", label = "Name only" },
     })
+    left:Pick("Row height", "rowHeight", {
+        { id = "normal", label = "Normal" },
+        { id = "compact", label = "Compact" },
+    })
+    left:Check("Show a details line", "showDetails", "Adds zone, XP per hour and time to the next level under each bar.")
     left:Pick("Show panel", "showPanel", {
         { id = "always", label = "Always" },
         { id = "combat", label = "Out of combat" },

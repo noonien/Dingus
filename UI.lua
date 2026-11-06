@@ -1,4 +1,5 @@
--- The panel: collapsible Party, Friends and Guild sections of XP bars.
+-- The panel: collapsible Party, Friends and Guild sections of XP bars in class
+-- colours, under a header that shows on hover.
 -- Flat textures only, no assets.
 
 local _, ns = ...
@@ -13,8 +14,13 @@ local DEFAULT_LEFT = 36
 local DEFAULT_OFFSET = 220
 local PADDING = 3
 local ROW_HEIGHT = 22
+local COMPACT_ROW_HEIGHT = 15
 local ROW_SPACING = 1
+local DETAILS_HEIGHT = 16
 local FONT_SIZE = 12
+local COMPACT_FONT_SIZE = 10
+local DETAILS_FONT_SIZE = 11
+local HEADER_HEIGHT = 16
 local MIN_WIDTH = 180
 local MAX_WIDTH = 420
 local WIDTH_STEP = 4
@@ -32,19 +38,17 @@ local SECTION_FONT_SIZE = 10
 local SECTION_LINE_ALPHA = 0.12
 local MORE_HEIGHT = 16
 local FADED_ALPHA = 0.25
--- Bars stay quiet: colours lean towards grey, and the fill is a deep tone of them
--- so white text stays readable. Quest and rested XP sit on nothing, so they need a
--- brighter tone than the fill to be seen through their transparency.
+-- Nothing is drawn behind a bar, and every part of it is see-through, so the game
+-- world shows through. The fill is a deep tone of the class colour so white text stays
+-- readable. Quest and rested XP are fainter than the fill.
+local BAR_BRIGHTNESS = 0.62
+local QUEST_SEGMENT = { 141 / 255, 111 / 255, 50 / 255 }
+local REST_SEGMENT = { 52 / 255, 85 / 255, 125 / 255 }
+local FILL_ALPHA = 0.6
+local SEGMENT_ALPHA = 0.4
+local OFFLINE_SEGMENT_BRIGHTNESS = 0.6
 local MUTE_AMOUNT = 0.5
-local SEGMENT_TOP = 0.30
-local SEGMENT_BOTTOM = 0.22
-local OVERLAY_TOP = 0.65
-local OVERLAY_BOTTOM = 0.5
-local OVERLAY_ALPHA = 0.65
-local OFFLINE_OVERLAY_ALPHA = 0.3
-local ICON_BRIGHTNESS = 0.7
 local TITLE_BRIGHTNESS = 0.8
-local CLASS_ICONS = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
 local ANIM_SECONDS = 0.25
 local TOAST_HOLD = 4
 local TOAST_FADE = 0.3
@@ -53,7 +57,6 @@ local UPDATE_SECONDS = 15
 local COLOR = {
     frame = { 14 / 255, 16 / 255, 20 / 255 },
     hover = { 1, 1, 1, 0.08 },
-    edge = { 1, 1, 1, 0.2 },
     offline = { 141 / 255, 147 / 255, 156 / 255 },
     muted = { 201 / 255, 206 / 255, 214 / 255 },
     rested = { 0.30, 0.55, 1 },
@@ -69,11 +72,18 @@ local rows = {}
 local refreshPending = false
 local toast
 local toastQueue = {}
+local header
 
+--- Outlined by default: most text sits straight on the game world.
 local function StyleText(text, size, flags)
-    text:SetFont(STANDARD_TEXT_FONT, size or FONT_SIZE, flags or "")
-    text:SetShadowColor(0, 0, 0, 0.9)
-    text:SetShadowOffset(1, -1)
+    flags = flags or "OUTLINE"
+    text:SetFont(STANDARD_TEXT_FONT, size or FONT_SIZE, flags)
+    if flags == "OUTLINE" then
+        text:SetShadowOffset(0, 0)
+    else
+        text:SetShadowColor(0, 0, 0, 0.9)
+        text:SetShadowOffset(1, -1)
+    end
 end
 
 local function NewText(parent, justify)
@@ -97,12 +107,8 @@ local function Mute(r, g, b)
     return r + (grey - r) * MUTE_AMOUNT, g + (grey - g) * MUTE_AMOUNT, b + (grey - b) * MUTE_AMOUNT
 end
 
---- A muted tone, lit slightly from above.
-local function PaintSegment(segment, r, g, b, top, bottom, a)
-    r, g, b = Mute(r, g, b)
-    segment:SetGradient("VERTICAL",
-        CreateColor(r * bottom, g * bottom, b * bottom, a),
-        CreateColor(r * top, g * top, b * top, a))
+local function PaintSegment(segment, color, brightness, alpha)
+    segment:SetVertexColor(color[1] * brightness, color[2] * brightness, color[3] * brightness, alpha)
 end
 
 local function ClassColor(class)
@@ -115,6 +121,15 @@ end
 local function BarColor(entry)
     if not entry.online then return unpack(COLOR.offline) end
     return ClassColor(entry.peer.class)
+end
+
+local function BarHeight()
+    return ns.settings.rowHeight == "compact" and COMPACT_ROW_HEIGHT or ROW_HEIGHT
+end
+
+--- The height of a row, without the space between rows.
+local function RowHeight()
+    return BarHeight() + (ns.settings.showDetails and DETAILS_HEIGHT or 0)
 end
 
 local function IsMaxLevel(peer)
@@ -286,15 +301,6 @@ local function SetBar(row, fraction)
     PlaceSegment(row, row.quest, fraction, questShare)
     local restShare = math.min(row.restFraction or 0, 1 - fraction - questShare)
     PlaceSegment(row, row.rest, fraction + questShare, restShare)
-
-    if fraction > 0 and fraction < 1 then
-        row.edge:Show()
-        row.edge:ClearAllPoints()
-        row.edge:SetPoint("TOPLEFT", row.track, "TOPLEFT", row.barWidth * fraction - 1, 0)
-        row.edge:SetPoint("BOTTOMLEFT", row.track, "BOTTOMLEFT", row.barWidth * fraction - 1, 0)
-    else
-        row.edge:Hide()
-    end
 end
 
 local function AnimateRow(row, elapsed)
@@ -327,7 +333,7 @@ local function CursorTravel()
     return math.max(math.abs(x - pressX), math.abs(y - pressY))
 end
 
---- Sections and rows both drag the panel, since it has no title bar. Whether a
+--- Sections, rows and the header all drag the panel. Whether a
 --- press was a click or a drag depends only on how far the cursor went, because
 --- the game can report a drag for a tiny movement and may not send a click after one.
 local function EnableClickAndDrag(button, onClick)
@@ -361,9 +367,6 @@ local function NewRow()
         if button == "RightButton" then OpenMenu(self) end
     end)
 
-    row.icon = row:CreateTexture(nil, "ARTWORK")
-    row.icon:SetPoint("TOPLEFT")
-
     -- Nothing is drawn behind the bar: this only marks where its segments start.
     row.track = row:CreateTexture(nil, "BACKGROUND")
 
@@ -376,14 +379,10 @@ local function NewRow()
     row.hover:SetVertexColor(unpack(COLOR.hover))
     row.hover:Hide()
 
-    row.edge = NewFlat(row, "ARTWORK", 1)
-    row.edge:SetVertexColor(unpack(COLOR.edge))
-    row.edge:SetWidth(1)
-
     row.pin = NewFlat(row, "ARTWORK", 2)
     row.pin:SetVertexColor(1, 1, 1)
     row.pin:SetSize(4, 4)
-    row.pin:SetPoint("TOPLEFT", row.icon, "TOPLEFT", 1, -1)
+    row.pin:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
 
     row.percent = NewText(row, "RIGHT")
     row.percent:SetPoint("RIGHT", row.track, "RIGHT", -5, 0)
@@ -395,6 +394,12 @@ local function NewRow()
     row.name = NewText(row, "LEFT")
     row.name:SetPoint("LEFT", row.level, "RIGHT", 4, 0)
     row.name:SetPoint("RIGHT", row.extra, "LEFT", -6, 0)
+
+    row.detailRate = NewText(row, "RIGHT")
+    row.detailRate:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -5, 2)
+    row.detailZone = NewText(row, "LEFT")
+    row.detailZone:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 5, 2)
+    row.detailZone:SetPoint("RIGHT", row.detailRate, "LEFT", -6, 0)
 
     row:SetScript("OnEnter", function(self)
         self.hover:Show()
@@ -410,14 +415,15 @@ end
 local function BarText(row, peer)
     local mode = ns.settings.barText
     local showLevel = mode == "full" or mode == "level"
-    row.level:SetWidth(showLevel and 18 or 1)
+    local compact = ns.settings.rowHeight == "compact"
+    row.level:SetWidth(showLevel and (compact and 14 or 18) or 1)
     row.level:SetText(showLevel and peer.level or "")
 
     local percent = ""
     if mode == "full" or mode == "percent" then
         if IsMaxLevel(peer) then
             percent = "Max"
-        elseif mode == "percent" then
+        elseif mode == "percent" or compact then
             percent = ("%d%%"):format(peer.xp / peer.xpMax * 100)
         else
             percent = ("%s/%s (%d%%)"):format(Tracker.FormatShort(peer.xp), Tracker.FormatShort(peer.xpMax),
@@ -427,21 +433,31 @@ local function BarText(row, peer)
     row.percent:SetText(percent)
 end
 
-local function PaintIcon(row, entry)
-    local icon, class = row.icon, entry.peer.class
-    local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
-    if coords then
-        icon:SetTexture(CLASS_ICONS)
-        icon:SetTexCoord(unpack(coords))
-        icon:SetVertexColor(ICON_BRIGHTNESS, ICON_BRIGHTNESS, ICON_BRIGHTNESS)
-    else
-        -- A class with no icon art still gets its colour.
-        icon:SetTexture(FLAT)
-        icon:SetTexCoord(0, 1, 0, 1)
-        local r, g, b = Mute(ClassColor(class))
-        icon:SetVertexColor(r * ICON_BRIGHTNESS, g * ICON_BRIGHTNESS, b * ICON_BRIGHTNESS)
+--- The line under the bar: where they are, and how fast they're levelling.
+local function UpdateDetails(row, entry)
+    local shown = ns.settings.showDetails and true or false
+    row.detailZone:SetShown(shown)
+    row.detailRate:SetShown(shown)
+    if not shown then return end
+
+    local peer = entry.peer
+    StyleText(row.detailZone, DETAILS_FONT_SIZE)
+    StyleText(row.detailRate, DETAILS_FONT_SIZE)
+    row.detailZone:SetText(peer.zone or "Zone not shared")
+
+    local rate = ""
+    if not entry.online then
+        rate = "Not playing"
+    elseif not IsMaxLevel(peer) then
+        local perHour = Tracker.Rate.Get(entry.runtime.rate, GetTime())
+        if perHour then
+            rate = ("%s/h, %s to %d"):format(Tracker.FormatShort(perHour),
+                Tracker.FormatDuration(Tracker.Rate.TimeToLevel(perHour, peer.xp, peer.xpMax)), peer.level + 1)
+        else
+            rate = "No recent XP"
+        end
     end
-    icon:SetDesaturated(not entry.online)
+    row.detailRate:SetText(rate)
 end
 
 local function UpdateRow(row, entry, y, width)
@@ -450,23 +466,22 @@ local function UpdateRow(row, entry, y, width)
     row.entry = entry
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", frame, "TOPLEFT", PADDING, y)
-    row:SetSize(width, ROW_HEIGHT)
-    -- A square icon, then the bar: the row's height sets the icon's size.
-    row.icon:SetSize(ROW_HEIGHT, ROW_HEIGHT)
+    row:SetSize(width, RowHeight())
     row.track:ClearAllPoints()
-    row.track:SetPoint("TOPLEFT", row, "TOPLEFT", ROW_HEIGHT + 1, 0)
-    row.track:SetPoint("BOTTOMRIGHT")
-    row.barWidth = width - ROW_HEIGHT - 1
-    PaintIcon(row, entry)
+    row.track:SetPoint("TOPLEFT", row, "TOPLEFT")
+    row.track:SetPoint("TOPRIGHT", row, "TOPRIGHT")
+    row.track:SetHeight(BarHeight())
+    row.barWidth = width
 
-    local r, g, b = BarColor(entry)
-    PaintSegment(row.fill, r, g, b, SEGMENT_TOP, SEGMENT_BOTTOM, 1)
-    local overlayAlpha = entry.online and OVERLAY_ALPHA or OFFLINE_OVERLAY_ALPHA
-    PaintSegment(row.quest, COLOR.quest[1], COLOR.quest[2], COLOR.quest[3], OVERLAY_TOP, OVERLAY_BOTTOM, overlayAlpha)
-    PaintSegment(row.rest, COLOR.rested[1], COLOR.rested[2], COLOR.rested[3], OVERLAY_TOP, OVERLAY_BOTTOM, overlayAlpha)
+    PaintSegment(row.fill, { BarColor(entry) }, BAR_BRIGHTNESS, FILL_ALPHA)
+    local segmentBrightness = entry.online and 1 or OFFLINE_SEGMENT_BRIGHTNESS
+    PaintSegment(row.quest, QUEST_SEGMENT, segmentBrightness, SEGMENT_ALPHA)
+    PaintSegment(row.rest, REST_SEGMENT, segmentBrightness, SEGMENT_ALPHA)
     row.pin:SetShown(s.pinned[peer.key] and true or false)
 
-    for _, text in ipairs({ row.name, row.level, row.percent, row.extra }) do StyleText(text) end
+    local fontSize = s.rowHeight == "compact" and COMPACT_FONT_SIZE or FONT_SIZE
+    for _, text in ipairs({ row.name, row.level, row.percent, row.extra }) do StyleText(text, fontSize) end
+    UpdateDetails(row, entry)
     row.name:SetText(entry.isSelf and "You" or peer.name)
     if entry.online then
         row.name:SetTextColor(1, 1, 1)
@@ -579,9 +594,13 @@ local function ShouldShow(list)
     if mode == "never" then return false end
     if (mode == "combat" or mode == "both") and InCombatLockdown() then return false end
     if (mode == "instance" or mode == "both") and IsInInstance() then return false end
+    -- Hidden down to the header, which stays so the panel can be brought back.
+    if s.collapsed then return true end
     -- Empty sections don't show, so with nothing listed there's nothing to draw.
     return #list.party + #list.friends + #list.guild > 0 or ListsOwnBar(list)
 end
+
+local NOTHING_LISTED = { party = {}, friends = {}, guild = {} }
 
 local function Render()
     local s = ns.settings
@@ -602,7 +621,7 @@ local function Render()
         rows[used] = rows[used] or NewRow()
         UpdateRow(rows[used], entry, y, width)
         gap = ROW_SPACING
-        y = y - ROW_HEIGHT - gap
+        y = y - RowHeight() - gap
     end
 
     local function AddSection(section, entries, online)
@@ -644,11 +663,12 @@ local function Render()
         end
     end
 
-    if ListsOwnBar(list) then AddRow(list.self) end
-    AddSection(sections.friends, list.friends, list.friendsOnline)
+    local shown = s.collapsed and NOTHING_LISTED or list
+    if not s.collapsed and ListsOwnBar(list) then AddRow(list.self) end
+    AddSection(sections.friends, shown.friends, list.friendsOnline)
     -- Everyone in a party is online, so a count there says nothing.
-    AddSection(sections.party, list.party)
-    AddSection(sections.guild, list.guild, list.guildOnline)
+    AddSection(sections.party, shown.party)
+    AddSection(sections.guild, shown.guild, list.guildOnline)
 
     for i = used + 1, #rows do
         rows[i]:Hide()
@@ -656,6 +676,7 @@ local function Render()
     end
     frame:SetHeight(-y - gap + PADDING)
     UI.listedRows = s.maxRows - budget
+    UI:UpdateHeader()
 end
 
 --- Redraws soon. A burst of messages costs one redraw.
@@ -668,17 +689,30 @@ function UI:Refresh()
     end)
 end
 
---- Folds or unfolds a section. The top edge holds even when growing upwards, so
---- the header under the mouse stays put; grow direction is for players coming and going.
+--- Redraws after a fold. The top edge holds even when growing upwards, so what's
+--- under the mouse stays put; grow direction is for players coming and going.
+local function RenderHoldingTop(top)
+    local s = ns.settings
+    Render()
+    if s.anchor and s.anchor.up and top then
+        s.anchor = { left = frame:GetLeft(), bottom = top - frame:GetHeight(), up = true }
+        UI:RestorePosition()
+    end
+end
+
 function UI:ToggleSection(id)
     local s = ns.settings
     local top = frame:GetTop()
     s.collapsedSections[id] = not s.collapsedSections[id] or nil
-    Render()
-    if s.anchor and s.anchor.up and top then
-        s.anchor = { left = frame:GetLeft(), bottom = top - frame:GetHeight(), up = true }
-        self:RestorePosition()
-    end
+    RenderHoldingTop(top)
+end
+
+--- Hides the panel down to its header, or brings it back.
+function UI:TogglePanel()
+    local s = ns.settings
+    local top = frame:GetTop()
+    s.collapsed = not s.collapsed or nil
+    RenderHoldingTop(top)
 end
 
 --- Reapplies settings that affect the frame's anchor as well as its contents.
@@ -717,8 +751,8 @@ local function ShowNextToast()
     if not peer then return end
     local r, g, b = ClassColor(peer.class)
     toast.chip:SetVertexColor(r, g, b)
-    StyleText(toast.level, 13)
-    StyleText(toast.text, 13)
+    StyleText(toast.level, 13, "")
+    StyleText(toast.text, 13, "")
     toast.level:SetText(peer.level)
     toast.text:SetText(("%s reached level %d"):format(peer.name, peer.level))
     toast:SetWidth(toast.text:GetStringWidth() + 56)
@@ -809,7 +843,7 @@ local function UpdateResize()
         end
     end
     if resizing.rows then
-        local rows = resizing.rows + math.floor((resizing.y - y) / scale / (ROW_HEIGHT + ROW_SPACING) + 0.5)
+        local rows = resizing.rows + math.floor((resizing.y - y) / scale / (RowHeight() + ROW_SPACING) + 0.5)
         rows = Clamp(rows, MIN_ROWS, MAX_ROWS)
         -- The start is what's listed, not the limit, so not moving yet changes nothing.
         resizing.rowsMoved = resizing.rowsMoved or rows ~= resizing.rows
@@ -892,8 +926,67 @@ end
 
 --- The grips only exist for the mouse, and only while it's over an unlocked panel.
 local function UpdateGrips(over)
-    local shown = resizing ~= nil or (over and not ns.settings.locked)
+    local s = ns.settings
+    local shown = resizing ~= nil or (over and not s.locked and not s.collapsed)
     for _, grip in ipairs(grips) do grip:SetShown(shown) end
+end
+
+--------------------------------------------------------------------------------
+-- Header
+--------------------------------------------------------------------------------
+
+local function NewHeaderButton(onClick)
+    local button = CreateFrame("Button", nil, header)
+    button:SetHeight(HEADER_HEIGHT)
+    button:SetScript("OnClick", onClick)
+    local highlight = NewFlat(button, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetVertexColor(unpack(COLOR.hover))
+    button.label = NewText(button, "CENTER")
+    button.label:SetPoint("CENTER")
+    StyleText(button.label, SECTION_FONT_SIZE)
+    button.label:SetTextColor(unpack(COLOR.muted))
+    return button
+end
+
+local function SetHeaderButtonText(button, text)
+    button.label:SetText(text)
+    button:SetWidth(button.label:GetStringWidth() + 10)
+end
+
+--- Sits above the panel, outside it, so showing it never moves the bars.
+local function BuildHeader()
+    header = CreateFrame("Button", nil, frame)
+    header:SetHeight(HEADER_HEIGHT)
+    header:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", PADDING, 0)
+    header:SetPoint("BOTTOMRIGHT", frame, "TOPRIGHT", -PADDING, 0)
+    EnableClickAndDrag(header, function(_, mouse)
+        if mouse == "RightButton" then ns.Options:Open() end
+    end)
+
+    local title = NewText(header, "LEFT")
+    title:SetPoint("LEFT", header, "LEFT", 2, 0)
+    StyleText(title, SECTION_FONT_SIZE)
+    title:SetTextColor(unpack(COLOR.muted))
+    title:SetText("Dingus")
+
+    header.options = NewHeaderButton(function() ns.Options:Open() end)
+    header.options:SetPoint("RIGHT", header, "RIGHT", 0, 0)
+    SetHeaderButtonText(header.options, "Options")
+
+    header.toggle = NewHeaderButton(function() UI:TogglePanel() end)
+    header.toggle:SetPoint("RIGHT", header.options, "LEFT", -2, 0)
+    header:Hide()
+end
+
+function UI:UpdateHeader()
+    SetHeaderButtonText(header.toggle, ns.settings.collapsed and "Show" or "Hide")
+    if ns.settings.collapsed then header:Show() end
+end
+
+--- Shows only with the mouse over the panel, except that a hidden panel always keeps it.
+local function UpdateHeaderHover(over)
+    header:SetShown((over or ns.settings.collapsed) and true or false)
 end
 
 --------------------------------------------------------------------------------
@@ -904,6 +997,8 @@ local function BuildFrame()
     frame = CreateFrame("Frame", "DingusFrame", UIParent)
     frame:SetFrameStrata("LOW")
     frame:SetClampedToScreen(true)
+    -- The header is outside the frame, and has to stay on screen with it.
+    frame:SetClampRectInsets(0, 0, HEADER_HEIGHT, 0)
     frame:SetMovable(true)
 
     sections.party = NewSection("party", "PARTY")
@@ -916,14 +1011,17 @@ local function BuildFrame()
         fadeClock = fadeClock + elapsed
         if fadeClock < 0.15 then return end
         fadeClock = 0
-        -- Reaches past the corner, where the grip sits outside the panel.
-        local over = self:IsMouseOver(0, -CORNER_GRIP, 0, CORNER_GRIP)
+        -- Reaches up to the header, and past the corner to the grip, both outside the panel.
+        local over = self:IsMouseOver(HEADER_HEIGHT, -CORNER_GRIP, 0, CORNER_GRIP)
         UpdateGrips(over)
+        UpdateHeaderHover(over)
+        local s = ns.settings
         local alpha = 1
-        if ns.settings.fadeUntilHover and not over then alpha = FADED_ALPHA end
+        if s.fadeUntilHover and not over and not s.collapsed then alpha = FADED_ALPHA end
         if self:GetAlpha() ~= alpha then self:SetAlpha(alpha) end
     end)
     BuildGrips()
+    BuildHeader()
 end
 
 function UI:Start()
