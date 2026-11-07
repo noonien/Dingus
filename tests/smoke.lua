@@ -646,6 +646,13 @@ test("the right-click menu builds and its actions work", function()
     MenuUtil, C_PartyInfo = nil, nil
 end)
 
+test("the right-click menu has no extra space at the bottom", function()
+    local style = RowNames()["Mira Vale"].menuMixin
+    local inset = style:GetInset()
+    assert(inset.bottom == inset.top, "bottom " .. inset.bottom .. ", top " .. inset.top)
+    assert(style:GetChildExtentPadding().width > 0, "room for the text")
+end)
+
 test("each section folds on its own, shows its count, and drags the panel", function()
     local buttons = {}
     for _, frame in ipairs(frames) do

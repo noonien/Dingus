@@ -42,6 +42,9 @@ local SECTION_FONT_SIZE = 10
 local SECTION_LINE_ALPHA = 0.12
 local MORE_HEIGHT = 16
 local FADED_ALPHA = 0.25
+local MENU_BACKGROUND = { 0.05, 0.05, 0.05, 0.925 }
+local MENU_INSET = { left = 8, top = 8, right = 8, bottom = 8 }
+local MENU_CHILD_PADDING = { width = 20, height = 0 } -- the same as Blizzard's default menu
 -- Nothing is drawn behind a bar, and every part of it is see-through, so the game
 -- world shows through. The fill is a deep tone of the class colour so white text stays
 -- readable. Quest and rested XP are fainter than the fill.
@@ -253,6 +256,19 @@ local function IsExcluded(peer)
     return ns.settings.excluded[peer.key] ~= nil
 end
 
+--- Blizzard's default menu style keeps extra room at the bottom for the shadow in its
+--- background art, which shows as empty space once a skin replaces that art. This
+--- flat style has no shadow, so its inset can be even, skinned or not.
+local MENU_STYLE = {
+    Generate = function(self)
+        local background = self:AttachTexture()
+        background:SetAllPoints()
+        background:SetColorTexture(MENU_BACKGROUND[1], MENU_BACKGROUND[2], MENU_BACKGROUND[3], MENU_BACKGROUND[4])
+    end,
+    GetInset = function() return MENU_INSET end,
+    GetChildExtentPadding = function() return MENU_CHILD_PADDING end,
+}
+
 local function OpenMenu(row)
     local entry = row.entry
     if not entry or entry.isSelf or not (MenuUtil and MenuUtil.CreateContextMenu) then return end
@@ -367,6 +383,7 @@ end
 
 local function NewRow()
     local row = CreateFrame("Button", nil, frame)
+    row.menuMixin = MENU_STYLE -- MenuUtil.CreateContextMenu styles the menu from its owner's menuMixin
     EnableClickAndDrag(row, function(self, button)
         if button == "RightButton" then OpenMenu(self) end
     end)
