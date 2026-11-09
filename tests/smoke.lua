@@ -109,6 +109,9 @@ C_Timer = {
 -- Steps time in small slices, so a timer started by a timer fires when it should.
 local STEP = 0.05
 local REGULAR_UPDATE_SECONDS = 30
+local ns
+-- Other players keep sending while time passes, unless a test silences them.
+local quiet = {}
 
 local function Advance(seconds)
     for _ = 1, math.ceil(seconds / STEP) do
@@ -124,6 +127,9 @@ local function Advance(seconds)
                 t.at = t.at + t.every
                 t.fn()
             end
+        end
+        for key, peer in pairs(ns and ns.Tracker and ns.Tracker.peers or {}) do
+            if not quiet[key] then peer.seen = time() end
         end
     end
 end
@@ -228,7 +234,7 @@ Settings = {
     OpenToCategory = noop,
 }
 
-local ns = {}
+ns = {}
 for _, file in ipairs({ "Core", "Comm", "Roster", "Tracker", "UI", "Options" }) do
     assert(loadfile(file .. ".lua"))("Dingus", ns)
 end
@@ -453,8 +459,8 @@ test("a guildmate lands in the guild group, and senders can't impersonate", func
     Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~201~60~1~100~0~MAGE~Mira Vale", "GUILD", "Joss Harrow")
     Advance(1)
     assert(RowNames()["Joss Harrow"], "guild row")
-    assert(ns.Roster:GroupOf(DingusAddonDB.peers["joss harrow"]) == "guild")
-    assert(DingusAddonDB.peers["mira vale"].level == 41, "impersonation refused")
+    assert(ns.Roster:GroupOf(ns.Tracker.peers["joss harrow"]) == "guild")
+    assert(ns.Tracker.peers["mira vale"].level == 41, "impersonation refused")
 end)
 
 test("whispers from non-friends and our own echoes are ignored", function()
@@ -462,9 +468,9 @@ test("whispers from non-friends and our own echoes are ignored", function()
     Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~301~10~1~100~0~MAGE~Ana Smith", "GUILD", "Ana Smith")
     Fire("CHAT_MSG_ADDON", "OtherAddon", "1~S~302~10~1~100~0~MAGE~Joss Harrow", "GUILD", "Joss Harrow")
     Advance(1)
-    assert(not DingusAddonDB.peers["stranger danger"])
-    assert(not DingusAddonDB.peers["ana smith"])
-    assert(DingusAddonDB.peers["joss harrow"].level == 44, "other prefix ignored")
+    assert(not ns.Tracker.peers["stranger danger"])
+    assert(not ns.Tracker.peers["ana smith"])
+    assert(ns.Tracker.peers["joss harrow"].level == 44, "other prefix ignored")
 end)
 
 test("a character friend's whisper route works", function()
@@ -564,8 +570,8 @@ test("a friend who logs off is dimmed and shows how long ago", function()
 end)
 
 test("the saved record survives into a new session's shape", function()
-    assert(DingusAddonDB.peers["mira vale"].key == "mira vale")
-    assert(DingusAddonDB.peers["mira vale"].account == "Mira#1")
+    assert(ns.Tracker.peers["mira vale"].key == "mira vale")
+    assert(ns.Tracker.peers["mira vale"].account == "Mira#1")
 end)
 
 --- Stands in for the game's menu. Returns the labels and actions of the last one opened.
@@ -814,13 +820,13 @@ test("party members with the addon get their own section, and nobody else does",
     group.members.party1.secret = true
     Fire("GROUP_ROSTER_UPDATE")
     Advance(3)
-    assert(ns.Roster:GroupOf(DingusAddonDB.peers["rhea stone"]) == "party", "kept while unreadable")
+    assert(ns.Roster:GroupOf(ns.Tracker.peers["rhea stone"]) == "party", "kept while unreadable")
     group.members.party1.secret = nil
 
     group.members.party1.connected = false
     Fire("UNIT_CONNECTION")
     Advance(3)
-    assert(ns.Roster:OnlineState(DingusAddonDB.peers["rhea stone"]) == false, "disconnected")
+    assert(ns.Roster:OnlineState(ns.Tracker.peers["rhea stone"]) == false, "disconnected")
 
     -- A Dungeon Finder group talks on another channel.
     group.home, group.instance = false, true
@@ -830,7 +836,7 @@ test("party members with the addon get their own section, and nobody else does",
     assert(Sent("INSTANCE_CHAT", SEP_S) == 1, "instance channel")
     assert(Sent("PARTY", SEP_S) == 0, "not party")
     Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~602~41~1~100~0~MAGE~Rhea Stone", "INSTANCE_CHAT", "Rhea Stone")
-    assert(DingusAddonDB.peers["rhea stone"].level == 41, "heard there too")
+    assert(ns.Tracker.peers["rhea stone"].level == 41, "heard there too")
 
     -- Raids stay out of it.
     group.instance, group.raid = false, true
@@ -845,11 +851,11 @@ test("party members with the addon get their own section, and nobody else does",
     Fire("GROUP_ROSTER_UPDATE")
     Advance(3)
     assert(not RowNames()["Rhea Stone"], "stranger gone")
-    assert(ns.Roster:GroupOf(DingusAddonDB.peers["joss harrow"]) == "guild", "guildmate back")
+    assert(ns.Roster:GroupOf(ns.Tracker.peers["joss harrow"]) == "guild", "guildmate back")
 end)
 
 test("each person is listed once: party, then friends, then guild", function()
-    local peers, s = DingusAddonDB.peers, ns.settings
+    local peers, s = ns.Tracker.peers, ns.settings
     local mira, joss, rhea = peers["mira vale"], peers["joss harrow"], peers["rhea stone"]
     local function Groups()
         return ns.Roster:GroupOf(mira), ns.Roster:GroupOf(joss), ns.Roster:GroupOf(rhea)
@@ -1299,7 +1305,7 @@ test("a guildmate going offline is picked up from the game's presence event", fu
     Advance(11)
     Fire("GUILD_ROSTER_UPDATE")
     Advance(2)
-    local peer = DingusAddonDB.peers["joss harrow"]
+    local peer = ns.Tracker.peers["joss harrow"]
     assert(ns.Roster:OnlineState(peer) == true, "online to start with")
 
     Advance(11)
@@ -1324,7 +1330,8 @@ test("a guildmate going offline is picked up from the game's presence event", fu
 end)
 
 test("the message timeout is only a last resort", function()
-    local peers = DingusAddonDB.peers
+    local peers = ns.Tracker.peers
+    quiet["nola wren"] = true
     peers["nola wren"] = { key = "nola wren", name = "Nola Wren", guild = "Test Guild", class = "MAGE",
         level = 10, xp = 1, xpMax = 100, seen = time() }
     local function Entry()
@@ -1337,7 +1344,28 @@ test("the message timeout is only a last resort", function()
     Advance(91)
     assert(not Entry().online, "silent too long")
     peers["nola wren"] = nil
+    quiet["nola wren"] = nil
     ns.UI:ApplySettings()
+end)
+
+test("someone online who stops sending is dropped, and comes back when they send again", function()
+    local peers = ns.Tracker.peers
+    assert(ns.Roster:OnlineState(peers["mira vale"]) == true, "online")
+    assert(RowNames()["Mira Vale"], "listed")
+    quiet["mira vale"] = true
+    Advance(140)
+    ns.UI:Refresh()
+    Advance(1)
+    assert(RowNames()["Mira Vale"], "still listed between heartbeats")
+    Advance(20)
+    ns.UI:Refresh()
+    Advance(1)
+    assert(not RowNames()["Mira Vale"], "turned Dingus off")
+    assert(not peers["mira vale"], "forgotten")
+    quiet["mira vale"] = nil
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~S~" .. (time() + 100000) .. "~41~1~100000~0~MAGE~Mira Vale", "WHISPER", 55)
+    Advance(1)
+    assert(RowNames()["Mira Vale"], "back after turning it on again")
 end)
 
 test("slash commands", function()
@@ -1384,7 +1412,7 @@ end)
 
 test("demo mode shows samples, levels one up, and leaves saved data alone", function()
     local peersBefore = {}
-    for key in pairs(DingusAddonDB.peers) do peersBefore[key] = true end
+    for key in pairs(ns.Tracker.peers) do peersBefore[key] = true end
     SlashCmdList.DINGUS("demo")
     Advance(1)
     assert(RowNames()["Tomas Reed"] and RowNames()["Ana Smith"] and RowNames()["Wren Alder"], "rows")
@@ -1395,7 +1423,7 @@ test("demo mode shows samples, levels one up, and leaves saved data alone", func
     SlashCmdList.DINGUS("demo")
     Advance(1)
     assert(not RowNames()["Wren Alder"], "demo off")
-    for key in pairs(DingusAddonDB.peers) do assert(peersBefore[key], "demo saved " .. key) end
+    for key in pairs(ns.Tracker.peers) do assert(peersBefore[key], "demo saved " .. key) end
 end)
 
 test("the not-found message is hidden only just after an addon whisper", function()

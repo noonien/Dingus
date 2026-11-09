@@ -52,7 +52,7 @@ local KEPT_ON_RESET = {
 --- so a changed default reaches everyone who hasn't set that option.
 function ns.InitDB(db)
     db.settings = db.settings or {}
-    db.peers = db.peers or {}
+    db.peers = nil -- other players used to be saved; now they last a session
     for _, list in ipairs(LISTS) do
         db.settings[list] = db.settings[list] or {}
     end

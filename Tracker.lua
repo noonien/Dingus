@@ -12,7 +12,7 @@ local STATUS_MIN_GAP = 10
 local LEVEL_DEBOUNCE = 1
 local HEARTBEAT_SECONDS = 30
 local ONLINE_WINDOW = 90        -- last resort, for someone the game's own lists don't cover
-local PEER_KEEP_SECONDS = 90 * 86400
+local SILENT_SECONDS = 150      -- online but quiet this long: they've stopped running Dingus
 local ALERT_MAX_GAP = 900       -- a level gained while unseen isn't news
 local QUEST_SCAN_DELAY = 1      -- QUEST_LOG_UPDATE comes in bursts
 local SELF_KEY = ":self"        -- a colon can't be in a character name
@@ -137,6 +137,8 @@ end
 --------------------------------------------------------------------------------
 
 local runtimes = {} -- key -> { rate, lastSeq }
+local peers = {}    -- key -> what they last sent. Never saved: it lasts the session.
+Tracker.peers = peers
 local me
 local seq = 0
 local statusTimerPending = false
@@ -266,17 +268,6 @@ local function OnQuestLogUpdate()
 end
 
 function Tracker:Start()
-    local peers = ns.db.peers
-    local now = time()
-    for key, peer in pairs(peers) do
-        if type(peer) ~= "table" or now - (peer.seen or 0) > PEER_KEEP_SECONDS then
-            peers[key] = nil
-        else
-            peer.key = key
-            peer.quests = nil -- from when turned-in quests were listed
-        end
-    end
-
     Snapshot()
     me.questXP = ReadCompletedQuestXP()
     ns.On("PLAYER_XP_UPDATE", OnOwnChange)
@@ -304,7 +295,6 @@ function Tracker:OnStatus(msg, route, account)
     local runtime = Runtime(key)
     if not Tracker.AcceptStatus(runtime, msg.seq) then return end
 
-    local peers = ns.db.peers
     local peer = peers[key]
     if not peer then
         peer = { key = key }
@@ -328,10 +318,14 @@ function Tracker:OnStatus(msg, route, account)
     ns.UI:Refresh()
 end
 
+--- true or false, or nil for someone the game lists as online who has stopped
+--- sending, as after turning Dingus off. What they last sent is out of date.
 local function IsOnline(peer)
+    local quiet = time() - (peer.seen or 0)
     local state = ns.Roster:OnlineState(peer)
-    if state ~= nil then return state end
-    return time() - (peer.seen or 0) < ONLINE_WINDOW
+    if state == nil then return quiet < ONLINE_WINDOW end
+    if state and quiet > SILENT_SECONDS then return nil end
+    return state
 end
 
 --- What the panel shows: { self = entry, party, friends, guild, friendsOnline, guildOnline }.
@@ -342,10 +336,15 @@ function Tracker:BuildList()
     local byAccount = {}
     local groups = { party = {}, friends = {}, guild = {} }
 
-    for key, peer in pairs(ns.db.peers) do
-        local group = ns.Roster:GroupOf(peer)
+    for key, peer in pairs(peers) do
+        local online = IsOnline(peer)
+        if online == nil then
+            -- Forgotten, so a later status starts fresh rather than as a level-up.
+            peers[key], runtimes[key] = nil, nil
+        end
+        local group = online ~= nil and ns.Roster:GroupOf(peer)
         if group and not s.hidden[key] then
-            local entry = { peer = peer, online = IsOnline(peer), runtime = Runtime(key), group = group }
+            local entry = { peer = peer, online = online, runtime = Runtime(key), group = group }
             if peer.account then
                 local lead = byAccount[peer.account]
                 if not lead then

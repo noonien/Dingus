@@ -235,7 +235,7 @@ test("status updates a peer, and only a fresh level-up alerts", function()
     ns.alerted = nil
     local route = { kind = "guild" }
     T:OnStatus(P.Decode("1~S~100~41~50~100~10~MAGE~Mira Vale~Tanaris"), route)
-    local peer = ns.db.peers["mira vale"]
+    local peer = ns.Tracker.peers["mira vale"]
     eq(peer.level, 41) eq(peer.xp, 50) eq(peer.zone, "Tanaris") eq(peer.guild, "Guild")
     eq(ns.alerted, nil, "first sighting")
 
@@ -256,7 +256,7 @@ end)
 
 test("completed quest xp reaches the peer", function()
     T:OnStatus(P.Decode("1~S~500~43~1~100~10~MAGE~Mira Vale~~40"), { kind = "guild" })
-    eq(ns.db.peers["mira vale"].questXP, 40)
+    eq(ns.Tracker.peers["mira vale"].questXP, 40)
 end)
 
 test("a new install gets the defaults, and saved settings stay", function()
