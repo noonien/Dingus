@@ -293,6 +293,9 @@ end
 function Tracker:OnStatus(msg, route, account)
     local key = Protocol.NameKey(msg.name)
     local runtime = Runtime(key)
+    -- The same status can arrive through guild chat before Battle.net.
+    -- Keep the account identity even when its status payload is a duplicate.
+    if account and peers[key] then peers[key].account = account end
     if not Tracker.AcceptStatus(runtime, msg.seq) then return end
 
     local peer = peers[key]
@@ -329,11 +332,11 @@ local function IsOnline(peer)
 end
 
 --- What the panel shows: { self = entry, party, friends, guild, friendsOnline, guildOnline }.
---- Characters on one Battle.net account share a row, led by the one in play.
+--- Each online character gets a row; offline characters share an account row.
 function Tracker:BuildList()
     if demo then return demo:BuildList() end
     local s = ns.settings
-    local byAccount = {}
+    local byAccount, onlineByAccount = {}, {}
     local groups = { party = {}, friends = {}, guild = {} }
 
     for key, peer in pairs(peers) do
@@ -345,7 +348,12 @@ function Tracker:BuildList()
         local group = online ~= nil and ns.Roster:GroupOf(peer)
         if group and not s.hidden[key] then
             local entry = { peer = peer, online = online, runtime = Runtime(key), group = group }
-            if peer.account then
+            if peer.account and entry.online then
+                table.insert(groups[group], entry)
+                local entries = onlineByAccount[peer.account] or {}
+                onlineByAccount[peer.account] = entries
+                entries[#entries + 1] = entry
+            elseif peer.account then
                 local lead = byAccount[peer.account]
                 if not lead then
                     byAccount[peer.account] = entry
@@ -364,8 +372,15 @@ function Tracker:BuildList()
             end
         end
     end
-    for _, entry in pairs(byAccount) do
-        table.insert(groups[entry.group], entry)
+    for account, entry in pairs(byAccount) do
+        local online = onlineByAccount[account]
+        if online then
+            local alts = entry.alts or {}
+            alts[#alts + 1] = entry.peer
+            for _, active in ipairs(online) do active.alts = alts end
+        else
+            table.insert(groups[entry.group], entry)
+        end
     end
 
     local function Visible(entry)

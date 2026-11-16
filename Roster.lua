@@ -218,6 +218,13 @@ local function FindCharFriend(name)
     end
 end
 
+--- Resolve identities for characters first encountered through guild or party chat.
+function Roster:AccountFor(name)
+    for _, route in ipairs(routes) do
+        if route.account and Protocol.SameName(route.name, name) then return route.account end
+    end
+end
+
 function Roster:IsCharFriend(name)
     return FindCharFriend(name) ~= nil
 end

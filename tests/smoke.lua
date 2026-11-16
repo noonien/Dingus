@@ -361,8 +361,41 @@ test("a Battle.net status adds a row and a working tooltip", function()
     local text = table.concat(tooltip, "\n")
     assert(text:find("Level 41 Mage", 1, true), text)
     assert(text:find("Zone=Desolace", 1, true), text)
+    assert(text:find("Battle.net=Mira#1", 1, true), text)
     assert(text:find("3 |4level:levels; ahead of you", 1, true), text)
     row.scripts.OnLeave(row)
+end)
+
+test("multiple online characters on one BattleTag each have a row", function()
+    local getCount, getGame = C_BattleNet.GetFriendNumGameAccounts, C_BattleNet.GetFriendGameAccountInfo
+    C_BattleNet.GetFriendNumGameAccounts = function() return 2 end
+    C_BattleNet.GetFriendGameAccountInfo = function(i, j)
+        if j == 1 then return getGame(i, j) end
+        return { gameAccountID = 56, isOnline = true, clientProgram = "WoW",
+            wowProjectID = 99, characterName = "Mira Twin" }
+    end
+    ns.Roster:Refresh()
+    assert(ns.Roster:BNetSender(56) == "Mira Twin", "second game account discovered")
+    Fire("CHAT_MSG_ADDON", "DingusXP", "1~S~100~20~1~100~0~MAGE~Mira Twin", "GUILD", "Mira Twin")
+    Fire("BN_CHAT_MSG_ADDON", "DingusXP", "1~S~100~20~1~100~0~MAGE~Mira Twin", "WHISPER", 56)
+    Advance(1)
+    assert(ns.Tracker.peers["mira twin"].account == "Mira#1", "duplicate still records identity")
+    local rows = RowNames()
+    assert(rows["Mira Vale"] and rows["Mira Twin"], "both online characters shown")
+    for _, name in ipairs({ "Mira Vale", "Mira Twin" }) do
+        rows[name].scripts.OnEnter(rows[name])
+        assert(table.concat(tooltip, "\n"):find("Battle.net=Mira#1", 1, true))
+        rows[name].scripts.OnLeave(rows[name])
+    end
+    C_BattleNet.GetFriendNumGameAccounts = getCount
+    C_BattleNet.GetFriendGameAccountInfo = getGame
+    ns.Roster:Refresh()
+    ns.UI:ApplySettings()
+    rows = RowNames()
+    assert(rows["Mira Vale"] and not rows["Mira Twin"], "offline alt folds into the active row")
+    assert(rows["Mira Vale"].entry.alts[1].name == "Mira Twin")
+    ns.Tracker.peers["mira twin"] = nil
+    ns.UI:ApplySettings()
 end)
 
 test("that friend now gets xp updates", function()
@@ -648,6 +681,7 @@ test("the right-click menu builds and its actions work", function()
     Advance(1)
     assert(not RowNames()["Mira Vale"], "hidden")
     ns.settings.hidden = {}
+    ns.UI:ApplySettings()
     Advance(1)
     MenuUtil, C_PartyInfo = nil, nil
 end)

@@ -193,6 +193,8 @@ local function ShowTooltip(row)
         GameTooltip:AddDoubleLine(label, value, color[1], color[2], color[3], 1, 1, 1)
     end
 
+    Field("Battle.net", peer.account or ns.Roster:AccountFor(peer.name) or "Unavailable")
+
     if not IsMaxLevel(peer) then
         Field("XP", number(peer.xp) .. " / " .. number(peer.xpMax))
         -- These two are coloured to match their segments on the bar.
