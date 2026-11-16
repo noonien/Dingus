@@ -405,16 +405,16 @@ test("that friend now gets xp updates", function()
     assert(Sent("BN", SEP_S) == 1)
 end)
 
-test("the zone is only sent when shared", function()
+test("the zone is always sent, even with the old setting disabled", function()
     sent = {}
     Fire("PLAYER_XP_UPDATE")
     Advance(10)
-    assert(Sent("BN", "Tanaris") == 1, "on by default")
+    assert(Sent("BN", "Tanaris") == 1, "zone included")
     ns.settings.shareZone = false
     sent = {}
     Fire("PLAYER_XP_UPDATE")
     Advance(10)
-    assert(Sent("BN", "Tanaris") == 0, "off")
+    assert(Sent("BN", "Tanaris") == 1, "obsolete setting cannot suppress the zone")
     ns.settings.shareZone = nil
 end)
 
@@ -1219,7 +1219,7 @@ test("reset restores the defaults and keeps lists, position and privacy", functi
     s.collapsedSections.friends = true
     s.pinned.someone, s.hidden.other, s.excluded.third = true, true, true
     s.anchor = { left = 10, top = 500, bottom = 400 }
-    s.shareGuild, s.shareZone = false, false
+    s.shareGuild = false
 
     StaticPopupDialogs.DINGUS_RESET.OnAccept()
 
@@ -1228,7 +1228,7 @@ test("reset restores the defaults and keeps lists, position and privacy", functi
     assert(next(s.collapsedSections) == nil, "sections unfolded")
     assert(s.pinned.someone and s.hidden.other and s.excluded.third, "lists kept")
     assert(s.anchor, "position kept")
-    assert(s.shareGuild == false and s.shareZone == false, "privacy kept")
+    assert(s.shareGuild == false, "privacy kept")
 
     ns.db.settings = ns.InitDB({}).settings
     ns.settings = ns.db.settings
@@ -1272,7 +1272,6 @@ test("by default only online friends below max level are listed and counted", fu
     assert(defaults.ownBar == "never", "own bar off")
     assert(defaults.alertWith == "both" and defaults.alertWho == "friends", "alerts for friends")
     assert(defaults.showPanel == "always", "panel on")
-    assert(defaults.shareZone == true, "zone shared")
     local main
     for _, frame in ipairs(frames) do
         if frame.frameName == "DingusFrame" then main = frame end

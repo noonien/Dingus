@@ -454,7 +454,6 @@ local function BuildPanel()
         { key = "shareParty", label = "Party",
             tooltip = "A party message reaches every member running Dingus, including anyone you stopped sharing with." },
     }, OnPrivacyChanged)
-    right:Check("Include my zone", "shareZone", "Adds your current zone to what you share.", OnPrivacyChanged)
     right:Action(function()
         local count = CountOf(ns.settings.excluded)
         if count == 0 then return "Sharing with everyone", false end

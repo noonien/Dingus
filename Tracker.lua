@@ -204,7 +204,7 @@ function Tracker:EncodeOwnStatus()
     if not me then Snapshot() end
     return Protocol.EncodeStatus({
         seq = NextSeq(), level = me.level, xp = me.xp, xpMax = me.xpMax, rested = me.rested,
-        class = me.class, name = me.name, zone = ns.settings.shareZone and me.zone or nil,
+        class = me.class, name = me.name, zone = me.zone,
         questXP = me.questXP,
     })
 end

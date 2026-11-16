@@ -48,7 +48,7 @@ Type `/dingus` to open the settings. Among other things, you can choose:
 
 Dingus sends your character's name, class, level, XP and rested XP, the XP from your completed quests, and your zone to other players running it. By default it shares with friends, guild and party.
 
-You can turn off sharing with each of those groups, leave out your zone, or stop sharing with one person from the bar's right-click menu.
+Your current zone is always included in shared updates. You can turn off sharing with each of those groups or stop sharing with one person from the bar's right-click menu.
 
 Guild and party messages reach everyone in that guild or party who runs Dingus. That includes anyone you stopped sharing with one by one, so turn off Guild or Party sharing if that matters to you.
 

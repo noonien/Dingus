@@ -31,7 +31,6 @@ ns.DEFAULTS = {
     shareFriends = true,
     shareGuild = true,
     shareParty = true,
-    shareZone = true,
 }
 
 -- Edited in place, so each player needs their own table rather than a default.
@@ -45,13 +44,13 @@ local KEPT_ON_RESET = {
     shareFriends = true,
     shareGuild = true,
     shareParty = true,
-    shareZone = true,
 }
 
 --- Only what the player has set is saved. Everything else reads from DEFAULTS,
 --- so a changed default reaches everyone who hasn't set that option.
 function ns.InitDB(db)
     db.settings = db.settings or {}
+    db.settings.shareZone = nil -- zones are always included now
     db.peers = nil -- other players used to be saved; now they last a session
     for _, list in ipairs(LISTS) do
         db.settings[list] = db.settings[list] or {}

@@ -245,7 +245,7 @@ test("status updates a peer, and only a fresh level-up alerts", function()
     clock = clock + 60
     T:OnStatus(P.Decode("1~S~101~42~1~100~10~MAGE~Mira Vale"), route)
     eq(peer.level, 42)
-    eq(peer.zone, nil, "zone cleared when no longer shared")
+    eq(peer.zone, nil, "missing zone clears the previous value")
     assert(ns.alerted == peer, "alerted")
 
     ns.alerted = nil
@@ -264,7 +264,7 @@ test("a new install gets the defaults, and saved settings stay", function()
     eq(defaults.showPanel, "always")
     eq(defaults.ownBar, "never")
     eq(defaults.showGuild, false)
-    eq(defaults.shareZone, true)
+    eq(ns.InitDB({ settings = { shareZone = false } }).settings.shareZone, nil, "obsolete zone setting removed")
     local saved = ns.InitDB({ settings = { ownBar = "always", width = 350 } }).settings
     eq(saved.ownBar, "always")
     eq(saved.width, 350)
