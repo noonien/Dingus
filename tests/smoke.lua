@@ -28,6 +28,7 @@ local function NewWidget(kind)
         IsMouseOver = function() return cursorOver end,
         SetText = function(self, text) self.text = text end,
         GetText = function(self) return self.text end,
+        SetEnabled = function(self, value) self.enabled = value end,
         SetSize = function(self, width, height) self.width, self.height = width, height end,
         SetWidth = function(self, value)
             assert(type(value) == "number" and value == value, "SetWidth needs a real number")
@@ -607,25 +608,27 @@ test("the saved record survives into a new session's shape", function()
     assert(ns.Tracker.peers["mira vale"].account == "Mira#1")
 end)
 
---- Stands in for the game's menu. Returns the labels and actions of the last one opened.
+--- Reads Dingus's row menu. Fields are looked up when read, so they show the last one opened;
+--- count is how many opened since this was called.
 local function FakeMenu()
-    local opened = { count = 0, labels = {}, actions = {}, enabled = {} }
-    local root = {
-        CreateTitle = noop,
-        CreateButton = function(_, label, fn)
-            opened.labels[#opened.labels + 1] = label
-            opened.actions[label] = fn
-            return { SetEnabled = function(_, enabled) opened.enabled[label] = enabled end }
-        end,
-    }
-    MenuUtil = {
-        CreateContextMenu = function(_, build)
-            opened.count = opened.count + 1
-            opened.labels, opened.actions, opened.enabled = {}, {}, {}
-            build(nil, root)
-        end,
-    }
-    return opened
+    local function Menu() return ns.UI.contextMenu end
+    local base = Menu() and Menu().opens or 0
+    return setmetatable({}, { __index = function(_, key)
+        local menu = Menu()
+        if key == "count" then return (menu and menu.opens or 0) - base end
+        if key == "shown" then return menu ~= nil and menu.shown end
+        if key == "menu" then return menu end
+        local labels, actions, enabled = {}, {}, {}
+        for _, item in ipairs(menu and menu.items or {}) do
+            if item.shown then
+                local label = item.label.text
+                labels[#labels + 1] = label
+                actions[label] = function() item.scripts.OnClick(item, "LeftButton") end
+                enabled[label] = item.enabled ~= false
+            end
+        end
+        return ({ labels = labels, actions = actions, enabled = enabled })[key]
+    end })
 end
 
 test("left-click does nothing on a row", function()
@@ -634,7 +637,6 @@ test("left-click does nothing on a row", function()
     Press(RowNames()["Mira Vale"], "LeftButton")
     assert(opened.count == 0, "no menu")
     assert(whispered == nil, "no whisper")
-    MenuUtil = nil
 end)
 
 test("right-click offers whisper and invite, and both use the character name", function()
@@ -660,7 +662,7 @@ test("right-click offers whisper and invite, and both use the character name", f
     Press(row, "RightButton")
     assert(opened.enabled["Whisper"] == false and opened.enabled["Invite"] == false, "offline: greyed out")
     row.entry.online = true
-    MenuUtil, C_PartyInfo = nil, nil
+    C_PartyInfo = nil
 end)
 
 test("the right-click menu builds and its actions work", function()
@@ -683,14 +685,38 @@ test("the right-click menu builds and its actions work", function()
     ns.settings.hidden = {}
     ns.UI:ApplySettings()
     Advance(1)
-    MenuUtil, C_PartyInfo = nil, nil
+    C_PartyInfo = nil
 end)
 
-test("the right-click menu has no extra space at the bottom", function()
-    local style = RowNames()["Mira Vale"].menuMixin
-    local inset = style:GetInset()
-    assert(inset.bottom == inset.top, "bottom " .. inset.bottom .. ", top " .. inset.top)
-    assert(style:GetChildExtentPadding().width > 0, "room for the text")
+test("the right-click menu is Dingus's own, evenly padded, and closes", function()
+    local opened = FakeMenu()
+    local row = RowNames()["Mira Vale"]
+    Press(row, "RightButton")
+    local menu = opened.menu
+    assert(opened.shown, "open")
+    assert(menu.title.text == "Mira Vale", "titled with the name")
+    -- One line for the title and one per item, with the same inset top and bottom.
+    assert(menu.height == (#opened.labels + 1) * 20 + 2 * 8, "height " .. tostring(menu.height))
+    assert(menu.width > 120, "room for the text")
+    opened.actions["Whisper"]()
+    assert(not opened.shown, "picking an item closes it")
+
+    Press(row, "RightButton")
+    local catcher
+    for index, widget in ipairs(frames) do
+        if widget == menu then catcher = frames[index + 1] end
+    end
+    catcher.scripts.OnClick(catcher, "LeftButton")
+    assert(not opened.shown, "a click elsewhere closes it")
+
+    Press(row, "RightButton")
+    local main
+    for _, widget in ipairs(frames) do
+        if widget.frameName == "DingusFrame" then main = widget end
+    end
+    main.scripts.OnHide(main)
+    assert(not opened.shown, "hiding the panel closes it")
+    assert(MenuUtil == nil, "Blizzard's menu isn't used")
 end)
 
 test("drag follows the scaled cursor every frame, even outside the panel", function()
@@ -1008,7 +1034,6 @@ test("sections with nobody in them don't show, and rows can drag the panel", fun
     assert(opened.count == 0, "a drag doesn't open the menu")
     Press(row, "RightButton")
     assert(opened.count == 1, "the next right-click does")
-    MenuUtil = nil
     Drag(RowNames()["You"], 50)
     assert(ns.settings.anchor, "the own bar drags too")
     ns.UI:ResetPosition()

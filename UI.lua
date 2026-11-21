@@ -43,8 +43,9 @@ local SECTION_LINE_ALPHA = 0.12
 local MORE_HEIGHT = 16
 local FADED_ALPHA = 0.25
 local MENU_BACKGROUND = { 0.05, 0.05, 0.05, 0.925 }
-local MENU_INSET = { left = 8, top = 8, right = 8, bottom = 8 }
-local MENU_CHILD_PADDING = { width = 20, height = 0 } -- the same as Blizzard's default menu
+local MENU_INSET = 8
+local MENU_ITEM_HEIGHT = 20
+local MENU_TEXT_GAP = 20 -- extra width past the longest label, as in Blizzard's menus
 -- Nothing is drawn behind a bar, and every part of it is see-through, so the game
 -- world shows through. The fill is a deep tone of the class colour so white text stays
 -- readable. Quest and rested XP are fainter than the fill.
@@ -258,43 +259,112 @@ local function IsExcluded(peer)
     return ns.settings.excluded[peer.key] ~= nil
 end
 
---- Blizzard's default menu style keeps extra room at the bottom for the shadow in its
---- background art, which shows as empty space once a skin replaces that art. This
---- flat style has no shadow, so its inset can be even, skinned or not.
-local MENU_STYLE = {
-    Generate = function(self)
-        local background = self:AttachTexture()
-        background:SetAllPoints()
-        background:SetColorTexture(MENU_BACKGROUND[1], MENU_BACKGROUND[2], MENU_BACKGROUND[3], MENU_BACKGROUND[4])
-    end,
-    GetInset = function() return MENU_INSET end,
-    GetChildExtentPadding = function() return MENU_CHILD_PADDING end,
-}
+--- The row menu is Dingus's own frame, not Blizzard's MenuUtil. Blizzard's menus come
+--- from shared pools that its unit menus reuse, and an addon opening one from its own
+--- code left them tainted: "Set Focus" on a unit frame was then blocked (FocusUnit).
+local contextMenu
+
+local function CloseContextMenu()
+    if contextMenu then contextMenu:Hide() end
+end
+
+local function BuildContextMenu()
+    contextMenu = CreateFrame("Frame", nil, UIParent)
+    contextMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+    contextMenu:SetClampedToScreen(true)
+    contextMenu:EnableMouse(true)
+    contextMenu:Hide()
+    contextMenu.items = {}
+    contextMenu.opens = 0
+    local background = NewFlat(contextMenu, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetVertexColor(MENU_BACKGROUND[1], MENU_BACKGROUND[2], MENU_BACKGROUND[3], MENU_BACKGROUND[4])
+
+    -- A screen-wide button under the menu: a click anywhere else closes it.
+    local catcher = CreateFrame("Button", nil, contextMenu)
+    catcher:SetFrameLevel(contextMenu:GetFrameLevel())
+    catcher:SetAllPoints(UIParent)
+    catcher:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    catcher:SetScript("OnClick", CloseContextMenu)
+
+    contextMenu.title = NewText(contextMenu)
+    contextMenu.title:SetPoint("TOPLEFT", contextMenu, "TOPLEFT", MENU_INSET, -MENU_INSET)
+    contextMenu.title:SetHeight(MENU_ITEM_HEIGHT)
+    UI.contextMenu = contextMenu
+end
+
+local function ContextMenuItem(index)
+    local item = contextMenu.items[index]
+    if item then return item end
+    item = CreateFrame("Button", nil, contextMenu)
+    item:SetFrameLevel(contextMenu:GetFrameLevel() + 2)
+    item:SetHeight(MENU_ITEM_HEIGHT)
+    local top = -MENU_INSET - index * MENU_ITEM_HEIGHT -- the title takes the first line
+    item:SetPoint("TOPLEFT", contextMenu, "TOPLEFT", 0, top)
+    item:SetPoint("TOPRIGHT", contextMenu, "TOPRIGHT", 0, top)
+    local highlight = NewFlat(item, "HIGHLIGHT")
+    highlight:SetAllPoints()
+    highlight:SetVertexColor(COLOR.hover[1], COLOR.hover[2], COLOR.hover[3], COLOR.hover[4])
+    item.label = NewText(item)
+    item.label:SetPoint("LEFT", item, "LEFT", MENU_INSET, 0)
+    contextMenu.items[index] = item
+    return item
+end
+
+--- Opens at the cursor. Each choice is { label, onClick, disabled }.
+local function OpenContextMenu(title, choices)
+    if not contextMenu then BuildContextMenu() end
+    contextMenu.opens = contextMenu.opens + 1
+    contextMenu.title:SetText(title)
+    contextMenu.title:SetTextColor(COLOR.muted[1], COLOR.muted[2], COLOR.muted[3])
+    local width = contextMenu.title:GetStringWidth()
+    for index, choice in ipairs(choices) do
+        local item = ContextMenuItem(index)
+        item.label:SetText(choice.label)
+        local color = choice.disabled and COLOR.offline or { 1, 1, 1 }
+        item.label:SetTextColor(color[1], color[2], color[3])
+        item:SetEnabled(not choice.disabled)
+        item:SetScript("OnClick", function()
+            CloseContextMenu()
+            choice.onClick()
+        end)
+        item:Show()
+        width = math.max(width, item.label:GetStringWidth())
+    end
+    for index = #choices + 1, #contextMenu.items do contextMenu.items[index]:Hide() end
+
+    local x, y = GetCursorPosition()
+    local scale = UIParent:GetEffectiveScale()
+    contextMenu:ClearAllPoints()
+    contextMenu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+    contextMenu:SetSize(math.ceil(width) + MENU_INSET * 2 + MENU_TEXT_GAP,
+        (#choices + 1) * MENU_ITEM_HEIGHT + MENU_INSET * 2)
+    contextMenu:Show()
+end
 
 local function OpenMenu(row)
     local entry = row.entry
-    if not entry or entry.isSelf or not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+    if not entry or entry.isSelf then return end
     local peer = entry.peer
     local s = ns.settings
-    MenuUtil.CreateContextMenu(row, function(_, root)
-        root:CreateTitle(peer.name)
-        local online = entry.online and true or false
-        root:CreateButton("Whisper", function() OpenWhisper(peer) end):SetEnabled(online)
-        root:CreateButton("Invite", function()
+    local offline = not entry.online
+    OpenContextMenu(peer.name, {
+        { label = "Whisper", disabled = offline, onClick = function() OpenWhisper(peer) end },
+        { label = "Invite", disabled = offline, onClick = function()
             if C_PartyInfo and C_PartyInfo.InviteUnit then C_PartyInfo.InviteUnit(peer.name) end
-        end):SetEnabled(online)
-        root:CreateButton(s.pinned[peer.key] and "Unpin" or "Pin to top", function()
+        end },
+        { label = s.pinned[peer.key] and "Unpin" or "Pin to top", onClick = function()
             s.pinned[peer.key] = not s.pinned[peer.key] or nil
             UI:Refresh()
-        end)
-        root:CreateButton("Hide", function()
+        end },
+        { label = "Hide", onClick = function()
             s.hidden[peer.key] = true
             UI:Refresh()
-        end)
-        root:CreateButton(IsExcluded(peer) and "Share my XP with them" or "Stop sharing my XP with them", function()
+        end },
+        { label = IsExcluded(peer) and "Share my XP with them" or "Stop sharing my XP with them", onClick = function()
             SetExcluded(peer, not IsExcluded(peer))
-        end)
-    end)
+        end },
+    })
 end
 
 --------------------------------------------------------------------------------
@@ -396,7 +466,6 @@ end
 
 local function NewRow()
     local row = CreateFrame("Button", nil, frame)
-    row.menuMixin = MENU_STYLE -- MenuUtil.CreateContextMenu styles the menu from its owner's menuMixin
     EnableClickAndDrag(row, function(self, button)
         if button == "RightButton" then OpenMenu(self) end
     end)
@@ -1047,6 +1116,7 @@ local function BuildFrame()
     sections.guild = NewSection("guild", "GUILD")
 
     -- The hover fade has to check the mouse itself: rows take the panel's mouse events.
+    frame:SetScript("OnHide", CloseContextMenu)
     local fadeClock = 0
     frame:SetScript("OnUpdate", function(self, elapsed)
         -- Cursor tracking must run every frame, independently of the hover throttle.
