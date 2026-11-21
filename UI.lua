@@ -349,6 +349,16 @@ end
 
 local pressX, pressY = 0, 0
 local moving = false
+local moveLeft, moveTop
+
+local function UpdateMove()
+    if not moving then return end
+    local x, y = GetCursorPosition()
+    local scale = frame:GetEffectiveScale()
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT",
+        moveLeft + (x - pressX) / scale, moveTop + (y - pressY) / scale)
+end
 
 local function CursorTravel()
     local x, y = GetCursorPosition()
@@ -368,13 +378,14 @@ local function EnableClickAndDrag(button, onClick)
     end)
     button:SetScript("OnDragStart", function()
         if ns.settings.locked then return end
+        moveLeft, moveTop = frame:GetLeft(), frame:GetTop()
         moving = true
-        frame:StartMoving()
+        UpdateMove()
     end)
     button:SetScript("OnDragStop", function()
         if not moving then return end
+        UpdateMove()
         moving = false
-        frame:StopMovingOrSizing()
         if CursorTravel() <= CLICK_SLOP then
             UI:RestorePosition() -- a click that shifted slightly: put the panel back
         else
@@ -1038,11 +1049,13 @@ local function BuildFrame()
     -- The hover fade has to check the mouse itself: rows take the panel's mouse events.
     local fadeClock = 0
     frame:SetScript("OnUpdate", function(self, elapsed)
+        -- Cursor tracking must run every frame, independently of the hover throttle.
+        UpdateMove()
         fadeClock = fadeClock + elapsed
         if fadeClock < 0.15 then return end
         fadeClock = 0
         -- Reaches up to the header, and past the corner to the grip, both outside the panel.
-        local over = self:IsMouseOver(HEADER_HEIGHT, -CORNER_GRIP, 0, CORNER_GRIP)
+        local over = moving or self:IsMouseOver(HEADER_HEIGHT, -CORNER_GRIP, 0, CORNER_GRIP)
         UpdateGrips(over)
         UpdateHeaderHover(over)
         local s = ns.settings

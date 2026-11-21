@@ -693,6 +693,38 @@ test("the right-click menu has no extra space at the bottom", function()
     assert(style:GetChildExtentPadding().width > 0, "room for the text")
 end)
 
+test("drag follows the scaled cursor every frame, even outside the panel", function()
+    local panel, handle
+    for _, widget in ipairs(frames) do
+        if widget.frameName == "DingusFrame" then panel = widget end
+        if widget.scripts.OnDragStart then handle = widget end
+    end
+    local oldScale = panel.GetEffectiveScale
+    panel.GetEffectiveScale = function() return 0.5 end
+    ns.settings.locked = false
+    cursor.x, cursor.y = 100, 100
+    handle.scripts.OnMouseDown(handle, "LeftButton")
+    handle.scripts.OnDragStart(handle)
+    cursorOver = false
+    for _, delta in ipairs({ 10, 100, 400 }) do
+        cursor.x, cursor.y = 100 + delta, 100 + delta / 2
+        panel.scripts.OnUpdate(panel, 0.01)
+        local point = panel.points[1]
+        assert(point[4] == 36 + delta / 0.5, "horizontal movement tracks cursor at UI scale")
+        assert(point[5] == 700 + delta / 2 / 0.5, "vertical movement tracks cursor at UI scale")
+    end
+    handle.scripts.OnDragStop(handle)
+    handle.scripts.OnMouseUp(handle, "LeftButton")
+    local stopped = panel.points[1]
+    cursor.x, cursor.y = 100, 100
+    panel.scripts.OnUpdate(panel, 0.01)
+    assert(panel.points[1] == stopped, "release stops tracking")
+    panel.GetEffectiveScale = oldScale
+    cursorOver = true
+    ns.settings.anchor = nil
+    ns.UI:ApplySettings()
+end)
+
 test("each section folds on its own, shows its count, and drags the panel", function()
     local buttons = {}
     for _, frame in ipairs(frames) do
